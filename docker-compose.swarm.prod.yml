@@ -1,0 +1,161 @@
+version: "3.8"
+
+# =============================================================================
+# PRODUCTION stack file pour pokclock-api.
+# Déployé sur api.pokclock.com via Traefik (DNS-01 wildcard OVH).
+#
+# Réutilise le réseau overlay `nw-web` (Traefik partagé avec pokclock-react,
+# dynamidoxa, etc.) et le node `vps-eb94174b`.
+#
+# Deploy depuis le VPS :
+#   cd /data/pokclock-api
+#   export IMAGE_TAG=<short-sha>
+#   docker stack deploy --with-registry-auth -c docker-compose.swarm.prod.yml pokclock-api
+# =============================================================================
+
+services:
+  api:
+    image: ghcr.io/cedricleblond35/pokclock-api:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "info"
+      DATABASE_URL: "postgres://pokclock:$$(cat /run/secrets/pg_password_pokclock)@postgres:5432/pokclock?sslmode=disable"
+      JWT_PRIVATE_KEY_PATH: "/run/secrets/jwt_private_pokclock"
+      JWT_PUBLIC_KEY_PATH: "/run/secrets/jwt_public_pokclock"
+      WORKER_VERIFY_URL: "https://pokclock-license.dynamidoxa.workers.dev/verify"
+      ALLOWED_ORIGINS: "https://pokclock.com,https://www.pokclock.com"
+    secrets:
+      - pg_password_pokclock
+      - jwt_private_pokclock
+      - jwt_public_pokclock
+    networks:
+      - nw-web
+      - nw-pokclock
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: any
+        delay: 10s
+      placement:
+        constraints:
+          - node.hostname == vps-eb94174b
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=nw-web"
+        - "traefik.http.services.pokclock-api.loadbalancer.server.port=8080"
+        # HTTP -> HTTPS redirect
+        - "traefik.http.middlewares.https-redir-api.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.https-redir-api.redirectscheme.permanent=true"
+        # Routers
+        - "traefik.http.routers.pokclock-api-http.entrypoints=web"
+        - "traefik.http.routers.pokclock-api-http.rule=Host(`api.pokclock.com`)"
+        - "traefik.http.routers.pokclock-api-http.middlewares=https-redir-api"
+        - "traefik.http.routers.pokclock-api.entrypoints=websecure"
+        - "traefik.http.routers.pokclock-api.rule=Host(`api.pokclock.com`)"
+        - "traefik.http.routers.pokclock-api.tls=true"
+        - "traefik.http.routers.pokclock-api.tls.certresolver=ovh-dns"
+        - "traefik.http.routers.pokclock-api.tls.domains[0].main=api.pokclock.com"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: "pokclock"
+      POSTGRES_DB: "pokclock"
+      POSTGRES_PASSWORD_FILE: "/run/secrets/pg_password_pokclock"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    secrets:
+      - pg_password_pokclock
+    volumes:
+      - pokclock_pg_data:/var/lib/postgresql/data
+    networks:
+      - nw-pokclock
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 10s
+      placement:
+        constraints:
+          - node.hostname == vps-eb94174b
+      labels:
+        - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pokclock -d pokclock"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backup:
+    image: restic/restic:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        export RESTIC_PASSWORD="$$(cat /run/secrets/restic_password)"
+        export AWS_ACCESS_KEY_ID="$$(cat /run/secrets/r2_access_key)"
+        export AWS_SECRET_ACCESS_KEY="$$(cat /run/secrets/r2_secret_key)"
+        export RESTIC_REPOSITORY="s3:https://$${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/pokclock-backups"
+        # Init le repo (silent si déjà fait)
+        restic snapshots > /dev/null 2>&1 || restic init
+        # Boucle cron-like : dump postgres puis upload, puis sleep 24h
+        while true; do
+          ts=$$(date -u +%Y%m%dT%H%M%SZ)
+          PGPASSWORD="$$(cat /run/secrets/pg_password_pokclock)" pg_dump \
+            -h postgres -U pokclock -d pokclock -Fc \
+            -f /tmp/pokclock-$$ts.dump
+          restic backup --tag pokclock-pg /tmp/pokclock-$$ts.dump
+          restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+          rm /tmp/pokclock-$$ts.dump
+          sleep 86400
+        done
+    environment:
+      R2_ACCOUNT_ID: "${R2_ACCOUNT_ID}"
+    secrets:
+      - pg_password_pokclock
+      - restic_password
+      - r2_access_key
+      - r2_secret_key
+    networks:
+      - nw-pokclock
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 60s
+      placement:
+        constraints:
+          - node.hostname == vps-eb94174b
+      labels:
+        - "traefik.enable=false"
+
+networks:
+  nw-web:
+    external: true
+  nw-pokclock:
+    driver: overlay
+
+volumes:
+  pokclock_pg_data:
+    driver: local
+
+secrets:
+  pg_password_pokclock:
+    external: true
+  jwt_private_pokclock:
+    external: true
+  jwt_public_pokclock:
+    external: true
+  restic_password:
+    external: true
+  r2_access_key:
+    external: true
+  r2_secret_key:
+    external: true

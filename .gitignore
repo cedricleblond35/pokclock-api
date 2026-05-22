@@ -1,0 +1,34 @@
+# Binaires Go
+/bin/
+*.exe
+*.test
+*.out
+*.prof
+
+# Couverture
+coverage.out
+coverage.html
+
+# Local env / secrets
+.env
+.env.local
+*.pem
+!**/example/*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs locaux
+*.log
+
+# Vendor (on garde modules dans le cache, pas vendored)
+/vendor/
+
+# Build artifacts CI
+dist/
