@@ -29,8 +29,30 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 WORKDIR /app
 COPY --from=builder --chown=app:app /out/api /app/api
-COPY --chown=app:app docker-entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+
+# Entrypoint embedded inline so the image build never depends on a context file.
+# Builds DATABASE_URL from PG_PASSWORD_FILE (Swarm secret path) at container
+# start, because Docker env values are not run through a shell.
+RUN cat > /app/entrypoint.sh <<'EOF' && chmod +x /app/entrypoint.sh && chown app:app /app/entrypoint.sh
+#!/bin/sh
+set -eu
+
+if [ -n "${PG_PASSWORD_FILE:-}" ]; then
+  if [ ! -r "$PG_PASSWORD_FILE" ]; then
+    echo "entrypoint: PG_PASSWORD_FILE=$PG_PASSWORD_FILE not readable" >&2
+    exit 1
+  fi
+  PG_PASSWORD=$(cat "$PG_PASSWORD_FILE")
+  : "${PG_USER:=pokclock}"
+  : "${PG_HOST:=postgres}"
+  : "${PG_PORT:=5432}"
+  : "${PG_DB:=pokclock}"
+  : "${PG_SSLMODE:=disable}"
+  export DATABASE_URL="postgres://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_DB}?sslmode=${PG_SSLMODE}"
+fi
+
+exec /app/api "$@"
+EOF
 
 USER app
 EXPOSE 8080
