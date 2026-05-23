@@ -19,7 +19,12 @@ services:
     environment:
       PORT: "8080"
       LOG_LEVEL: "info"
-      DATABASE_URL: "postgres://pokclock:$$(cat /run/secrets/pg_password_pokclock)@postgres:5432/pokclock?sslmode=disable"
+      PG_USER: "pokclock"
+      PG_HOST: "postgres"
+      PG_PORT: "5432"
+      PG_DB: "pokclock"
+      PG_SSLMODE: "disable"
+      PG_PASSWORD_FILE: "/run/secrets/pg_password_pokclock"
       JWT_PRIVATE_KEY_PATH: "/run/secrets/jwt_private_pokclock"
       JWT_PUBLIC_KEY_PATH: "/run/secrets/jwt_public_pokclock"
       WORKER_VERIFY_URL: "https://pokclock-license.dynamidoxa.workers.dev/verify"
