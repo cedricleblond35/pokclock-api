@@ -87,7 +87,6 @@ jobs:
             git reset --hard origin/main
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             export IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
-            export R2_ACCOUNT_ID="${{ vars.R2_ACCOUNT_ID }}"
             docker stack deploy \
               --with-registry-auth \
               -c docker-compose.swarm.prod.yml \
