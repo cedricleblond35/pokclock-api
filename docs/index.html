@@ -1,0 +1,1607 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pokclock-api — Documentation technique</title>
+<meta name="description" content="Documentation technique du backend pokclock-api (Go/Echo, Swarm, Cloudflare R2).">
+
+<!-- Mermaid pour les diagrammes (UMD build) -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
+<!-- Highlight.js bundle complet (toutes les langues communes, UMD) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script>
+
+<style>
+:root {
+  --bg: #0f1419;
+  --bg-elev: #161b22;
+  --bg-code: #0d1117;
+  --fg: #c9d1d9;
+  --fg-muted: #8b949e;
+  --fg-dim: #6e7681;
+  --accent: #58a6ff;
+  --accent-soft: rgba(88, 166, 255, 0.15);
+  --success: #3fb950;
+  --warning: #d29922;
+  --danger: #f85149;
+  --border: #30363d;
+  --border-soft: #21262d;
+  --sidebar-w: 280px;
+  --content-max: 960px;
+  --radius: 6px;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  scroll-behavior: smooth;
+}
+
+/* Layout */
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+aside {
+  width: var(--sidebar-w);
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  overflow-y: auto;
+  padding: 1.5rem 1rem;
+}
+
+main {
+  margin-left: var(--sidebar-w);
+  padding: 2rem 3rem;
+  max-width: calc(var(--content-max) + 6rem);
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  aside { position: relative; width: 100%; height: auto; }
+  main { margin-left: 0; padding: 1rem; }
+  .layout { flex-direction: column; }
+}
+
+/* Sidebar */
+.brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--fg);
+  text-decoration: none;
+  display: block;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.brand small {
+  display: block;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+  margin-top: 0.25rem;
+}
+
+nav ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: section;
+}
+nav li { margin: 0; padding: 0; counter-increment: section; }
+nav a {
+  display: block;
+  padding: 0.35rem 0.5rem;
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 0.875rem;
+  border-radius: var(--radius);
+  border-left: 2px solid transparent;
+  margin-bottom: 1px;
+}
+nav a::before {
+  content: counter(section) ". ";
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+nav a:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+nav a.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.search-box {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+  font-family: var(--font-sans);
+}
+.search-box::placeholder { color: var(--fg-dim); }
+.search-box:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+/* Content */
+h1, h2, h3, h4 { color: var(--fg); font-weight: 600; margin-top: 2rem; margin-bottom: 1rem; }
+h1 { font-size: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; margin-top: 0; }
+h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border-soft); padding-bottom: 0.35rem; margin-top: 3rem; }
+h3 { font-size: 1.2rem; margin-top: 2rem; }
+h4 { font-size: 1rem; color: var(--fg-muted); }
+
+p, ul, ol { margin: 0.75rem 0; }
+ul, ol { padding-left: 1.5rem; }
+li { margin: 0.25rem 0; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--bg-code);
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  color: #e6edf3;
+}
+
+pre {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  overflow-x: auto;
+  position: relative;
+  margin: 1rem 0;
+}
+pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  font-family: var(--font-sans);
+}
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { color: var(--fg); border-color: var(--accent); }
+.copy-btn.copied { color: var(--success); border-color: var(--success); }
+
+/* Mermaid */
+.mermaid {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin: 1rem 0;
+  text-align: center;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: var(--bg-elev);
+  font-weight: 600;
+  color: var(--fg);
+}
+td code { font-size: 0.8em; }
+tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
+
+/* Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.callout-warn  { border-left-color: var(--warning); background: rgba(210, 153, 34, 0.12); }
+.callout-danger { border-left-color: var(--danger); background: rgba(248, 81, 73, 0.12); }
+.callout-success { border-left-color: var(--success); background: rgba(63, 185, 80, 0.12); }
+.callout strong { color: var(--fg); }
+.callout :first-child { margin-top: 0; }
+.callout :last-child { margin-bottom: 0; }
+
+/* Tags / pills */
+.tag {
+  display: inline-block;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  padding: 1px 8px;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  margin-right: 4px;
+  font-family: var(--font-mono);
+}
+.tag-ok { color: var(--success); border-color: var(--success); }
+.tag-todo { color: var(--warning); border-color: var(--warning); }
+.tag-later { color: var(--fg-dim); }
+
+/* Use case card */
+.uc {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin: 1.25rem 0;
+  background: var(--bg-elev);
+}
+.uc h3 { margin-top: 0; }
+.uc .meta {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  margin: 0.5rem 0 1rem;
+  flex-wrap: wrap;
+}
+.uc .meta span strong { color: var(--fg); }
+
+/* Pattern card */
+.pattern {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  background: var(--bg-elev);
+}
+.pattern .name {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+.pattern .where {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+}
+
+/* Command card */
+.cmd {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 1rem 0;
+  overflow: hidden;
+}
+.cmd-header {
+  background: var(--bg-elev);
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+.cmd-header strong { color: var(--fg); }
+.cmd-header .ctx { color: var(--fg-muted); font-size: 0.8rem; }
+.cmd-body { padding: 0.5rem 1rem 1rem; }
+.cmd-body pre { margin-top: 0.5rem; }
+.cmd-why {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  margin: 0.5rem 0;
+}
+.cmd-out {
+  background: var(--bg-code);
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--success);
+  white-space: pre-wrap;
+}
+
+/* Header banner */
+.banner {
+  background: linear-gradient(135deg, rgba(88,166,255,0.12), rgba(63,185,80,0.06));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+.banner h1 { margin: 0; border: 0; padding: 0; }
+.banner p { color: var(--fg-muted); margin: 0.5rem 0 0; }
+.banner .meta {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+.banner .meta span { color: var(--fg-muted); }
+.banner .meta strong { color: var(--fg); }
+
+/* Doc updated bar */
+.doc-meta {
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  padding-top: 2rem;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 4rem;
+}
+
+/* Hidden / search filtered */
+.hidden { display: none !important; }
+
+/* TOC mini */
+.toc-mini {
+  font-size: 0.85rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+}
+.toc-mini ul { margin: 0.25rem 0 0; padding-left: 1.25rem; }
+.toc-mini strong { color: var(--fg-muted); }
+
+/* Colored inline highlights for semantic emphasis */
+.hl-blue   { color: #58a6ff; font-weight: 500; }
+.hl-green  { color: #3fb950; font-weight: 500; }
+.hl-red    { color: #f85149; font-weight: 500; }
+.hl-orange { color: #d29922; font-weight: 500; }
+.hl-purple { color: #a78bfa; font-weight: 500; }
+
+/* HTTP method pills */
+.http-get    { background:#1f6feb; color:#fff; padding:1px 6px; border-radius:3px; font-family:var(--font-mono); font-size:0.75em; font-weight:600; letter-spacing:0.5px; }
+.http-post   { background:#3fb950; color:#000; padding:1px 6px; border-radius:3px; font-family:var(--font-mono); font-size:0.75em; font-weight:600; letter-spacing:0.5px; }
+.http-patch  { background:#d29922; color:#000; padding:1px 6px; border-radius:3px; font-family:var(--font-mono); font-size:0.75em; font-weight:600; letter-spacing:0.5px; }
+.http-delete { background:#f85149; color:#fff; padding:1px 6px; border-radius:3px; font-family:var(--font-mono); font-size:0.75em; font-weight:600; letter-spacing:0.5px; }
+
+/* HTTP status pills */
+.s2xx { background:#3fb950; color:#000; padding:1px 6px; border-radius:3px; font-family:var(--font-mono); font-size:0.75em; font-weight:600; }
+.s4xx { background:#d29922; color:#000; padding:1px 6px; border-radius:3px; font-family:var(--font-mono); font-size:0.75em; font-weight:600; }
+.s5xx { background:#f85149; color:#fff; padding:1px 6px; border-radius:3px; font-family:var(--font-mono); font-size:0.75em; font-weight:600; }
+
+/* Path / endpoint highlight */
+.path { color:#79c0ff; font-family:var(--font-mono); }
+.env-var { color:#ffa657; font-family:var(--font-mono); font-size:0.9em; }
+.secret { color:#f85149; font-family:var(--font-mono); font-size:0.9em; }
+
+/* Roadmap timeline */
+.timeline {
+  border-left: 2px solid var(--border);
+  padding-left: 1.5rem;
+  margin: 1rem 0 1rem 0.5rem;
+}
+.timeline-item {
+  position: relative;
+  padding-bottom: 1.5rem;
+}
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -2rem;
+  top: 0.3rem;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+}
+.timeline-item.done::before { background: var(--success); border-color: var(--success); }
+.timeline-item.todo::before { background: var(--bg); border-color: var(--warning); }
+.timeline-item h4 { margin: 0; }
+.timeline-item .date { color: var(--fg-dim); font-size: 0.8rem; font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<aside>
+  <a href="#top" class="brand">pokclock-api
+    <small>Documentation technique · v0.1</small>
+  </a>
+
+  <input type="search" class="search-box" id="search" placeholder="Rechercher dans la doc..." aria-label="Rechercher">
+
+  <nav>
+    <ol>
+      <li><a href="#overview">Vue d'ensemble</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#data-model">Modèle de données</a></li>
+      <li><a href="#use-cases">Cas d'usage</a></li>
+      <li><a href="#design-patterns">Design Patterns</a></li>
+      <li><a href="#tech-stack">Stack technique</a></li>
+      <li><a href="#commands">Commandes essentielles</a></li>
+      <li><a href="#gotchas">Particularités &amp; pièges</a></li>
+      <li><a href="#security">Sécurité</a></li>
+      <li><a href="#roadmap">Roadmap</a></li>
+      <li><a href="#glossary">Glossaire</a></li>
+      <li><a href="#maintenance">Maintenance de cette doc</a></li>
+    </ol>
+  </nav>
+</aside>
+
+<main id="top">
+
+<div class="banner">
+  <h1>pokclock-api · Documentation technique</h1>
+  <p>Backend Go/Echo pour les fonctionnalités cloud de PokClock — license, JWT, sync, audit, backups quotidiens.</p>
+  <div class="meta">
+    <span><strong>Statut</strong> Phase 0.A complète</span>
+    <span><strong>Live</strong> <a href="https://api.pokclock.com/api/health">api.pokclock.com</a></span>
+    <span><strong>Repo</strong> cedricleblond35/pokclock-api</span>
+    <span><strong>Dernière maj</strong> 2026-05-24</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     1. VUE D'ENSEMBLE
+============================================================ -->
+<section id="overview">
+<h2>1. Vue d'ensemble</h2>
+
+<h3>Mission</h3>
+<p>
+<strong>pokclock-api</strong> est le backend cloud qui sert l'application PokClock desktop (WPF) en lui apportant trois capacités que le mode <em>standalone</em> ne peut pas offrir :
+</p>
+<ul>
+  <li><strong>Validation de licence centralisée</strong> via un Cloudflare Worker (<code>/verify</code>) et émission d'un JWT RS256 signé.</li>
+  <li><strong>Synchronisation des structures de tournoi</strong> (CRUD avec audit log immuable) entre plusieurs postes / clubs.</li>
+  <li><strong>Source d'autorité d'horloge serveur</strong> (endpoint <code>/api/time</code>) pour neutraliser la triche par décalage horloge locale.</li>
+</ul>
+
+<h3>Positionnement dans l'écosystème</h3>
+<div class="mermaid">
+flowchart LR
+  WPF["App PokClock WPF Desktop"] -->|"POST auth issue"| API["pokclock-api Go Echo"]
+  API -->|"POST verify"| Worker["Cloudflare Worker license"]
+  Worker -.->|"D1"| D1["License DB"]
+  Worker -->|"200 ok or 401"| API
+  API -->|"JWT RS256"| WPF
+  WPF -->|"GET POST PATCH Bearer JWT"| API
+  API --> PG["Postgres structures and audit"]
+  API -.->|"nightly pg_dump"| Restic["restic backup"]
+  Restic --> R2["R2 pokclock-backups"]
+  Site["pokclock-react Marketing"] -->|"exe download"| R2R["R2 pokclock-releases"]
+
+  classDef apiCls fill:#1f6feb,stroke:#58a6ff,color:#fff
+  classDef workerCls fill:#d29922,stroke:#bf8700,color:#000
+  classDef pgCls fill:#3fb950,stroke:#2ea043,color:#000
+  classDef r2Cls fill:#7c3aed,stroke:#a78bfa,color:#fff
+  class API apiCls
+  class Worker workerCls
+  class PG pgCls
+  class R2 r2Cls
+  class R2R r2Cls
+</div>
+
+<h3>Pourquoi ce design</h3>
+<ul>
+  <li><strong>L'API ne stocke jamais la license en clair</strong> — elle délègue la validation au Worker Cloudflare qui détient la source de vérité (D1). L'API ne fait que <em>servir d'intermédiaire</em> entre le client desktop et le Worker, et émet un JWT court (15 min) après validation.</li>
+  <li><strong>Le JWT est signé en RS256</strong> (RSA-2048, clé privée en secret Swarm). La clé publique est exposée via JWKS (<code>/.well-known/jwks.json</code>) → n'importe quel composant peut vérifier un token sans appeler l'API.</li>
+  <li><strong>Postgres ne contient pas de PII</strong> — uniquement la métadata métier (structures de tournoi, audit log). Les emails, noms, hardware IDs vivent chez Cloudflare (D1).</li>
+  <li><strong>Backups chiffrés côté client</strong> (restic) → Cloudflare R2 n'a jamais accès au contenu en clair.</li>
+</ul>
+
+<h3>État actuel — Phase 0.A (complète au 2026-05-24)</h3>
+<table>
+  <thead><tr><th>Composant</th><th>État</th><th>URL / Référence</th></tr></thead>
+  <tbody>
+    <tr><td><span class="hl-blue">API Echo Go</span></td><td><span class="tag tag-ok">✓ opérationnel</span></td><td><a href="https://api.pokclock.com/api/health">api.pokclock.com<span class="path">/api/health</span></a></td></tr>
+    <tr><td><span class="hl-blue">JWKS public</span> RS256</td><td><span class="tag tag-ok">✓</span></td><td><a href="https://api.pokclock.com/.well-known/jwks.json"><span class="path">/.well-known/jwks.json</span></a></td></tr>
+    <tr><td><span class="hl-purple">Auth chain</span> (Worker /verify)</td><td><span class="tag tag-ok">✓</span></td><td>kid <code>JT9HcT-A-ngXrr1Sko88rcLc7do</code></td></tr>
+    <tr><td><span class="hl-green">TLS</span> (LE R13 via OVH DNS-01)</td><td><span class="tag tag-ok">✓</span></td><td>Cert mono-domaine, <strong>90j</strong></td></tr>
+    <tr><td><span class="hl-orange">Postgres</span> + migrations Goose</td><td><span class="tag tag-ok">✓</span></td><td>2 tables, version 2</td></tr>
+    <tr><td><span class="hl-purple">Backup restic</span> → R2</td><td><span class="tag tag-ok">✓</span></td><td>Snapshot <code>241d4c3d</code> · retention <strong>7d / 4w / 6m</strong></td></tr>
+    <tr><td>GHA Build &amp; Deploy</td><td><span class="tag tag-ok">✓ vert</span></td><td>Workflow auto sur <code>main</code></td></tr>
+    <tr><td>CI <code>ci.yml</code> (golangci-lint)</td><td><span class="tag tag-todo">⚠ à fixer</span></td><td>v1.61 <span class="hl-red">incompatible Go 1.24</span> → bump v1.63.4</td></tr>
+    <tr><td>Cert wildcard <code>*.pokclock.com</code></td><td><span class="tag tag-later">plus tard</span></td><td>Labels Traefik à ajuster</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     2. ARCHITECTURE
+============================================================ -->
+<section id="architecture">
+<h2>2. Architecture</h2>
+
+<h3>2.1 Clean Architecture en couches</h3>
+<p>
+Le code suit une organisation <span class="hl-blue">Clean Architecture</span> stricte. Les dépendances vont toujours du <em>extérieur</em> vers le <em>centre</em> — <strong>jamais l'inverse</strong>. Le domaine n'a aucune dépendance sur l'infra.
+</p>
+
+<div class="mermaid">
+flowchart TB
+    Main[main go composition root]
+    Config[config go env loader]
+    Routes[router go]
+    Mid[middleware]
+    Handlers[handlers auth structures health]
+    AuthD[domain auth Signer WorkerClient]
+    Pool[db postgres pool]
+    Migrations[db migrations embed FS]
+    WorkerExt[Cloudflare Worker verify]
+    PGext[Postgres 16]
+
+    Main --> Config
+    Main --> Pool
+    Main --> AuthD
+    Main --> Routes
+    Routes --> Mid
+    Routes --> Handlers
+    Handlers --> AuthD
+    Handlers --> Pool
+    Pool --> Migrations
+    AuthD -.->|HTTP| WorkerExt
+    Pool --> PGext
+</div>
+
+<h3>2.2 Topologie de déploiement (Docker Swarm)</h3>
+<div class="mermaid">
+flowchart TB
+    Internet[Internet]
+    Traefik[Traefik v3.3.6 nw-web]
+    API1[api replica 1 port 8080]
+    API2[api replica 2 port 8080]
+    PG[Postgres 16 volume]
+    Backup[backup restic and pg_dump]
+    R2[R2 pokclock-backups]
+    OVH[OVH DNS API]
+    LE[Lets Encrypt]
+
+    Internet -->|HTTPS 443| Traefik
+    Traefik --> API1
+    Traefik --> API2
+    API1 --> PG
+    API2 --> PG
+    Backup --> PG
+    Backup -->|S3 API| R2
+    Traefik -->|DNS-01| OVH
+    Traefik -->|HTTP-01| LE
+</div>
+
+<h3>2.3 Pipeline CI/CD</h3>
+<div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant Dev
+    participant GH as GitHub
+    participant GHA as GitHub Actions
+    participant GHCR as ghcr.io
+    participant VPS
+
+    Dev->>GH: git push origin main
+    GH->>GHA: trigger Build and Deploy
+    GHA->>GHA: Job ci vet test build
+    GHA->>GHA: Job build docker buildx
+    GHA->>GHCR: docker push image
+    GHA->>VPS: SSH deploy
+    VPS->>GH: git reset hard origin main
+    VPS->>GHCR: docker login
+    VPS->>VPS: docker stack deploy
+    VPS-->>GHA: exit 0
+    GHA-->>Dev: workflow green
+</div>
+</section>
+
+<!-- ============================================================
+     3. MODÈLE DE DONNÉES
+============================================================ -->
+<section id="data-model">
+<h2>3. Modèle de données</h2>
+
+<h3>3.1 Diagramme ER</h3>
+<div class="mermaid">
+erDiagram
+  STRUCTURES ||--o{ STRUCTURES_AUDIT : "tracks changes"
+  STRUCTURES {
+    uuid id PK
+    text slug UK "URL-friendly"
+    text name "Display name"
+    text kind "tournament cash free"
+    jsonb settings "Blind levels"
+    timestamptz created_at
+    timestamptz updated_at "auto trigger"
+  }
+  STRUCTURES_AUDIT {
+    uuid id PK
+    uuid structure_id FK "ON DELETE CASCADE"
+    text action "CREATE UPDATE DELETE"
+    jsonb changes "Diff before after"
+    text actor "JWT sub claim"
+    timestamptz created_at
+  }
+</div>
+
+<h3>3.2 Migrations</h3>
+<p>
+Les migrations sont gérées par <a href="https://github.com/pressly/goose"><code>goose v3</code></a> et embedées dans le binaire via <code>embed.FS</code>. Elles s'exécutent automatiquement au démarrage de l'API.
+</p>
+<table>
+  <thead><tr><th>Version</th><th>Fichier</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>internal/db/migrations/001_structures.sql</code></td><td>Extension <code>uuid-ossp</code>, table <code>structures</code> + trigger <code>updated_at</code></td></tr>
+    <tr><td>2</td><td><code>internal/db/migrations/002_structures_audit.sql</code></td><td>Table <code>structures_audit</code> avec FK CASCADE, indexes <code>(structure_id)</code> et <code>(created_at DESC)</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+<strong>Astuce</strong> : pour créer une nouvelle migration, suis la convention <code>NNN_description.sql</code> (3 chiffres, padding zéro) et incrémente. Goose détecte automatiquement la nouvelle version.
+</div>
+
+<h3>3.3 Pool de connexions</h3>
+<p>
+Le pool <code>pgxpool.Pool</code> est configuré dans <code>internal/db/postgres.go</code> avec des limites raisonnables pour 2 replicas API + 1 service backup :
+</p>
+<pre><code class="language-go">cfg.MaxConns = 10
+cfg.MinConns = 2
+cfg.MaxConnLifetime = 30 * time.Minute
+cfg.MaxConnIdleTime = 5 * time.Minute</code></pre>
+<p>
+Total potentiel : <strong>30 connexions concurrentes</strong> côté Postgres (10 × 3 services), bien en dessous du <code>max_connections = 100</code> par défaut.
+</p>
+</section>
+
+<!-- ============================================================
+     4. CAS D'USAGE
+============================================================ -->
+<section id="use-cases">
+<h2>4. Cas d'usage</h2>
+
+<!-- UC1 -->
+<div class="uc">
+  <h3>UC1 — Activation license + obtention JWT</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> App WPF (poste de croupier)</span>
+    <span><strong>Endpoint</strong> <span class="http-post">POST</span> <span class="path">/api/auth/issue</span></span>
+    <span><strong>Rate-limit</strong> <span class="hl-orange">10/min/IP</span></span>
+  </div>
+  <p>
+    Au démarrage, l'app envoie à l'API son triple identifiant (license + hardware + worker token persistés dans <code>license.json</code> après une activation initiale via le Worker). L'API forward la requête au Worker Cloudflare, qui consulte D1 et répond <code>200 ok</code> si tout matche. L'API émet alors un JWT RS256 valide 15 min.
+  </p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant WPF as App WPF
+  participant API as pokclock-api
+  participant W as Worker /verify
+  participant D1 as Cloudflare D1
+
+  WPF->>API: POST /api/auth/issue
+  API->>API: rate-limit check 10 per min
+  API->>W: POST /verify with licenseKey hwid token
+  W->>D1: SELECT licenses
+  D1-->>W: row
+  W->>W: HMAC validate workerToken
+  alt valid
+    W-->>API: 200 ok with sub
+    API->>API: signer.Issue sub exp 15m
+    API-->>WPF: 200 token expires_in 900
+  else invalid
+    W-->>API: 401 bad_signature
+    API-->>WPF: 401 license_invalid
+  end
+</div>
+</div>
+
+<!-- UC2 -->
+<div class="uc">
+  <h3>UC2 — Refresh JWT (sans re-validation Worker)</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> App WPF</span>
+    <span><strong>Endpoint</strong> <span class="http-post">POST</span> <span class="path">/api/auth/refresh</span></span>
+    <span><strong>Auth</strong> <span class="hl-purple">JWT</span> actuel en Bearer</span>
+  </div>
+  <p>
+    Pour éviter d'appeler le Worker à chaque fois (et donc surcharger D1 inutilement), le client peut rafraîchir son JWT tant que l'ancien est encore valide. Le nouveau token a même <code>sub</code> et nouvelle expiration. Si le JWT est expiré ou révoqué, il faut repasser par UC1.
+  </p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant WPF as App WPF
+  participant API as pokclock-api
+
+  WPF->>API: POST /api/auth/refresh with Bearer old_jwt
+  API->>API: jwt verify signature and exp
+  alt valid
+    API->>API: signer.Issue same sub new exp 15m
+    API-->>WPF: 200 token expires_in 900
+  else expired
+    API-->>WPF: 401 token_expired
+    Note over WPF: client doit refaire UC1
+  end
+</div>
+</div>
+
+<!-- UC3 -->
+<div class="uc">
+  <h3>UC3 — Créer / Modifier une structure de tournoi (avec audit log)</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> App WPF (utilisateur authentifié)</span>
+    <span><strong>Endpoints</strong> <span class="http-post">POST</span> <span class="path">/api/structures</span> · <span class="http-patch">PATCH</span> <span class="path">/api/structures/:slug</span></span>
+    <span><strong>Auth</strong> <span class="hl-purple">JWT Bearer</span> obligatoire</span>
+  </div>
+  <p>
+    Chaque création/modification est <strong>transactionnelle</strong> : la mise à jour de <code>structures</code> et l'écriture de la ligne d'audit dans <code>structures_audit</code> se font dans la même TX. Si quoi que ce soit échoue, rien n'est persisté. L'<code>actor</code> du log = la claim <code>sub</code> du JWT.
+  </p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant WPF as App WPF
+  participant API as pokclock-api
+  participant PG as Postgres
+
+  WPF->>API: PATCH /api/structures/main-clock Bearer jwt
+  API->>API: jwtAuthMiddleware verify and extract sub
+  API->>PG: BEGIN
+  API->>PG: UPDATE structures SET settings
+  API->>PG: INSERT structures_audit row
+  API->>PG: COMMIT
+  PG-->>API: ok
+  API-->>WPF: 200 structure JSON
+</div>
+</div>
+
+<!-- UC4 -->
+<div class="uc">
+  <h3>UC4 — Backup quotidien Postgres → R2</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> Service <code>pokclock-api_backup</code> (cron-like)</span>
+    <span><strong>Fréquence</strong> Toutes les 24h (<code>sleep 86400</code>)</span>
+    <span><strong>Stockage</strong> Cloudflare R2 bucket <code>pokclock-backups</code></span>
+  </div>
+  <p>
+    Le service backup tourne en permanence dans une boucle <code>while true</code>. Au démarrage il installe <code>postgresql16-client</code> (l'image <code>restic/restic</code> est alpine mais sans pg_dump), puis initialise le repo restic chiffré sur R2 si pas encore fait, puis enchaîne pg_dump + upload + prune en boucle.
+  </p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Cron as backup loop
+  participant Apk as apk
+  participant Restic as restic
+  participant PG as Postgres
+  participant R2 as Cloudflare R2
+
+  Cron->>Apk: apk add postgresql16-client au boot
+  Cron->>Restic: restic snapshots probe
+  alt repo absent
+    Restic->>R2: restic init
+    R2-->>Restic: repo created
+  end
+  loop chaque 24h
+    Cron->>PG: pg_dump Fc f tmp dump
+    PG-->>Cron: dump file
+    Cron->>Restic: restic backup tag pokclock-pg
+    Restic->>R2: upload chunks chiffres dedup
+    R2-->>Restic: snapshot id saved
+    Cron->>Restic: restic forget keep daily 7 weekly 4 monthly 6 prune
+    Restic->>R2: delete expired
+    Cron->>Cron: rm dump and sleep 86400
+  end
+</div>
+</div>
+
+<!-- UC5 -->
+<div class="uc">
+  <h3>UC5 — Restauration d'un backup</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> Opérateur (Cédric) en situation d'incident</span>
+    <span><strong>Pré-requis</strong> Accès SSH VPS + secrets R2 + clé restic</span>
+  </div>
+  <p>Procédure de restauration depuis n'importe quel snapshot du bucket :</p>
+  <div class="mermaid">
+sequenceDiagram
+  participant Op as Operateur
+  participant Restic as restic CLI
+  participant R2 as R2 pokclock-backups
+  participant PG as Postgres
+
+  Op->>Restic: restic snapshots
+  Restic->>R2: list snapshots
+  R2-->>Restic: snapshot ids
+  Restic-->>Op: liste affichee
+
+  Op->>Restic: restic restore SHA target tmp restore
+  Restic->>R2: download chunks decrypt
+  Restic-->>Op: dump file disponible
+
+  Op->>PG: pg_restore U pokclock d pokclock
+  PG-->>Op: data reinjectee
+</div>
+</div>
+</section>
+
+<!-- ============================================================
+     5. DESIGN PATTERNS
+============================================================ -->
+<section id="design-patterns">
+<h2>5. Design Patterns</h2>
+
+<p>Les patterns ci-dessous sont ceux <strong>effectivement présents</strong> dans le code, pas une liste théorique. Chaque ligne pointe vers le fichier exact où ça se passe.</p>
+
+<h3>5.1 Patterns Créationnels</h3>
+
+<div class="pattern">
+  <div class="name">Dependency Injection (manual, via struct)</div>
+  <div class="where">cmd/api/main.go · internal/api/router.go (Deps struct)</div>
+  <p>
+    Pas de framework DI. Toutes les dépendances (pool DB, signer JWT, client Worker, logger) sont construites dans <code>main.go</code> puis injectées dans <code>api.Mount(echo, Deps{...})</code>. Ça rend les handlers triviaux à tester (on passe un mock dans la struct).
+  </p>
+  <pre><code class="language-go">type Deps struct {
+    BuildSHA       string
+    Pool           *pgxpool.Pool
+    Signer         *auth.Signer
+    WorkerClient   *auth.WorkerClient
+    AllowedOrigins []string
+    Logger         *slog.Logger
+}</code></pre>
+</div>
+
+<div class="pattern">
+  <div class="name">Factory Method (construction du Signer)</div>
+  <div class="where">internal/domain/auth/signer.go (NewSigner)</div>
+  <p>
+    <code>NewSigner(privPath, pubPath)</code> est une factory qui lit les fichiers PEM, parse les clés RSA, calcule le <code>kid</code> (SHA-256 du modulus encodé), et retourne un <code>*Signer</code> prêt à signer + servir JWKS. Le caller n'a jamais à manipuler des <code>*rsa.PrivateKey</code> ou des PEM blocks directement.
+  </p>
+</div>
+
+<div class="pattern">
+  <div class="name">Singleton de fait (le pool pgx)</div>
+  <div class="where">internal/db/postgres.go · cmd/api/main.go</div>
+  <p>
+    Un seul <code>*pgxpool.Pool</code> est créé au démarrage et partagé entre tous les handlers. Pas un singleton GoF strict (pas de <code>GetInstance()</code> global) — c'est une <em>instance unique par processus</em> portée par l'injection. Bien plus testable qu'un vrai singleton.
+  </p>
+</div>
+
+<h3>5.2 Patterns Structurels</h3>
+
+<div class="pattern">
+  <div class="name">Facade (package internal/api)</div>
+  <div class="where">internal/api/router.go (api.Mount)</div>
+  <p>
+    Le package <code>api</code> est une facade au sens GoF : il expose une seule fonction <code>Mount(e, deps)</code> qui configure tout l'aspect HTTP (routes, middlewares, groupes, rate-limit). <code>main.go</code> n'a pas besoin de connaître Echo, les groupes, ou les handlers individuels.
+  </p>
+</div>
+
+<div class="pattern">
+  <div class="name">Adapter (pgx stdlib pour goose)</div>
+  <div class="where">internal/db/postgres.go (RunMigrations)</div>
+  <p>
+    Goose attend un <code>*sql.DB</code> standard (driver <code>database/sql</code>), mais on utilise <code>pgxpool</code> qui n'expose pas cette interface. L'adapter <code>stdlib.OpenDB(connConfig)</code> de pgx convertit la config en <code>*sql.DB</code> compatible le temps des migrations, puis on referme. Aucun changement côté goose.
+  </p>
+</div>
+
+<div class="pattern">
+  <div class="name">Repository (pool injecté dans les handlers)</div>
+  <div class="where">internal/api/structures.go</div>
+  <p>
+    Chaque handler reçoit <code>pool *pgxpool.Pool</code> en dépendance et l'utilise pour ses requêtes. Pas d'ORM. Pour Phase 0.B, on pourra extraire un vrai <code>StructuresRepository</code> interface si on veut mocker plus finement, mais à ce stade l'overhead n'est pas justifié.
+  </p>
+</div>
+
+<div class="pattern">
+  <div class="name">Decorator (Echo middlewares)</div>
+  <div class="where">internal/api/router.go · middleware.go</div>
+  <p>
+    Chaque middleware (Recover, RequestID, slog, CORS, JWT, RateLimit) <em>décore</em> le handler suivant en ajoutant un comportement transverse. Pattern Decorator pur : <code>func(next HandlerFunc) HandlerFunc</code>. Les middlewares peuvent se chaîner sans connaître leurs voisins.
+  </p>
+</div>
+
+<h3>5.3 Patterns Comportementaux</h3>
+
+<div class="pattern">
+  <div class="name">Chain of Responsibility (pipeline Echo)</div>
+  <div class="where">internal/api/router.go (Mount)</div>
+  <p>
+    L'ordre des <code>e.Use(...)</code> définit la chaîne. Chaque middleware peut :<br>
+    1. Court-circuiter (rate-limit dépassé → 429 sans appeler next),<br>
+    2. Passer au suivant (next(c)),<br>
+    3. Modifier le contexte après (logger après next).<br>
+    C'est exactement le pattern Chain of Responsibility.
+  </p>
+</div>
+
+<div class="pattern">
+  <div class="name">Strategy (cert resolver Traefik)</div>
+  <div class="where">pokclock-infra/traefik/docker-compose.swarm.prod.yml</div>
+  <p>
+    Deux résolveurs ACME coexistent : <code>myresolver</code> (HTTP-01) pour les hosts historiques, <code>ovh-dns</code> (DNS-01 OVH) pour les nouveaux + wildcards. Chaque router Traefik choisit sa stratégie via le label <code>tls.certresolver=...</code>. Stratégies interchangeables sans toucher au code de l'app.
+  </p>
+</div>
+
+<div class="pattern">
+  <div class="name">Template Method (entrypoint backup)</div>
+  <div class="where">docker-compose.swarm.prod.yml (service backup, command)</div>
+  <p>
+    Le squelette est figé : <code>apk add → restic init/probe → loop(pg_dump → restic backup → forget → sleep)</code>. Les "hooks" (creds, repo URL, retention policy) sont injectés via env vars et secrets. Si demain on change Postgres pour MariaDB, on remplace juste l'étape <code>pg_dump</code> par <code>mysqldump</code>, le reste tient.
+  </p>
+</div>
+
+<div class="pattern">
+  <div class="name">Observer (slog + RequestID)</div>
+  <div class="where">internal/api/router.go (slogMiddleware) · middleware.RequestID</div>
+  <p>
+    Le middleware <code>slogMiddleware</code> observe chaque requête après <code>next()</code> et émet une ligne de log structurée (méthode, path, status, latence, request ID). Les observateurs (Loki, Promtail, ou simplement la stdout JSON) consomment sans coupler le handler à eux.
+  </p>
+</div>
+</section>
+
+<!-- ============================================================
+     6. STACK TECHNIQUE
+============================================================ -->
+<section id="tech-stack">
+<h2>6. Stack technique</h2>
+
+<table>
+  <thead><tr><th>Couche</th><th>Outil</th><th>Version</th><th>Rôle</th></tr></thead>
+  <tbody>
+    <tr><td>Langage</td><td>Go</td><td>1.24</td><td>Backend</td></tr>
+    <tr><td>HTTP framework</td><td><a href="https://github.com/labstack/echo">Echo</a></td><td>v4.12</td><td>Routeur + middleware</td></tr>
+    <tr><td>JWT</td><td><a href="https://github.com/golang-jwt/jwt">golang-jwt/jwt</a></td><td>v5</td><td>Sign/verify RS256</td></tr>
+    <tr><td>DB driver</td><td><a href="https://github.com/jackc/pgx">pgx</a></td><td>v5</td><td>Pool Postgres, perf</td></tr>
+    <tr><td>Migrations</td><td><a href="https://github.com/pressly/goose">goose</a></td><td>v3.22</td><td>Schema versioning</td></tr>
+    <tr><td>Logging</td><td><code>log/slog</code></td><td>stdlib</td><td>JSON structured</td></tr>
+    <tr><td>Tests</td><td><code>testing</code> + <code>httptest</code></td><td>stdlib</td><td>Unit + integration</td></tr>
+    <tr><td>Lint</td><td><a href="https://github.com/golangci/golangci-lint">golangci-lint</a></td><td>v1.63.4 (à bumper depuis v1.61)</td><td>Static analysis</td></tr>
+    <tr><td>DB</td><td>PostgreSQL</td><td>16-alpine</td><td>Source of truth métier</td></tr>
+    <tr><td>Backup</td><td><a href="https://restic.net/">restic</a> + pg_dump</td><td>latest + 16</td><td>Snapshots chiffrés vers R2</td></tr>
+    <tr><td>Reverse proxy</td><td>Traefik</td><td>v3.3.6</td><td>TLS, routing, load balance</td></tr>
+    <tr><td>Orchestration</td><td>Docker Swarm</td><td>26.x</td><td>Service mgmt sur le VPS</td></tr>
+    <tr><td>Image registry</td><td>GHCR (GitHub)</td><td>—</td><td>Images Docker prod</td></tr>
+    <tr><td>CI/CD</td><td>GitHub Actions</td><td>—</td><td>Build + push + deploy auto</td></tr>
+    <tr><td>Object storage</td><td>Cloudflare R2</td><td>—</td><td>Backups + binaires (buckets distincts)</td></tr>
+    <tr><td>License validation</td><td>Cloudflare Worker</td><td>—</td><td><code>/verify</code> endpoint vers D1</td></tr>
+    <tr><td>DNS / ACME</td><td>OVH</td><td>—</td><td>DNS-01 challenge pour wildcard</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     7. COMMANDES
+============================================================ -->
+<section id="commands">
+<h2>7. Commandes essentielles</h2>
+
+<h3>7.1 Développement local</h3>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Démarrer l'API en local (sans Docker)</strong>
+    <span class="ctx">Contexte : dev itératif rapide</span>
+  </div>
+  <div class="cmd-body">
+    <div class="cmd-why">
+      Lance directement le binaire Go contre une Postgres locale. Tu as besoin d'une instance Postgres qui tourne (Docker ou installation native) et d'un keypair JWT généré localement.
+    </div>
+    <pre><code class="language-bash"># Générer un keypair JWT pour le dev
+make keypair
+# → produit .secrets/jwt_priv.pem et .secrets/jwt_pub.pem (gitignored)
+
+# Lancer Postgres local (si pas déjà)
+docker run --rm -d --name pgdev \
+  -e POSTGRES_USER=pokclock -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=pokclock \
+  -p 5432:5432 postgres:16-alpine
+
+# Exporter les vars d'env minimales
+export DATABASE_URL="postgres://pokclock:dev@localhost:5432/pokclock?sslmode=disable"
+export JWT_PRIVATE_KEY_PATH=.secrets/jwt_priv.pem
+export JWT_PUBLIC_KEY_PATH=.secrets/jwt_pub.pem
+export WORKER_VERIFY_URL="http://localhost:8787/verify"  # ou un mock httptest
+export ALLOWED_ORIGINS="http://localhost:3000"
+export LOG_LEVEL=debug
+
+# Run
+make run   # ou : go run ./cmd/api</code></pre>
+    <div class="cmd-out">Sortie attendue :
+{"time":"...","level":"INFO","msg":"starting pokclock-api","build":"dev","port":"8080"}
+{"time":"...","level":"INFO","msg":"goose: successfully migrated database to version: 2"}
+{"time":"...","level":"INFO","msg":"server listening","addr":":8080"}</div>
+  </div>
+</div>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Tests + couverture</strong>
+    <span class="ctx">Contexte : avant un commit</span>
+  </div>
+  <div class="cmd-body">
+    <pre><code class="language-bash">make test         # go test -race ./...
+make vet          # go vet ./...
+make lint         # golangci-lint run ./...</code></pre>
+    <div class="cmd-why">
+      Le <code>-race</code> détecte les race conditions à l'exécution. À toujours utiliser localement avant un push.
+    </div>
+  </div>
+</div>
+
+<h3>7.2 Build &amp; déploiement</h3>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Déploiement automatique</strong>
+    <span class="ctx">Contexte : flow normal</span>
+  </div>
+  <div class="cmd-body">
+    <div class="cmd-why">
+      Aucune action manuelle nécessaire. Push sur <code>main</code> = build + push GHCR + deploy VPS via la GHA.
+    </div>
+    <pre><code class="language-bash">git push origin main
+# Surveille : https://github.com/cedricleblond35/pokclock-api/actions</code></pre>
+  </div>
+</div>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Redéploiement manuel sur le VPS</strong>
+    <span class="ctx">Contexte : urgence ou debug</span>
+  </div>
+  <div class="cmd-body">
+    <pre><code class="language-bash">ssh -p 52999 debian@54.38.243.50
+cd /data/pokclock-api
+git pull
+docker stack deploy --with-registry-auth \
+  -c docker-compose.swarm.prod.yml pokclock-api</code></pre>
+    <div class="cmd-out">Sortie attendue :
+Updating service pokclock-api_api
+Updating service pokclock-api_postgres
+Updating service pokclock-api_backup</div>
+  </div>
+</div>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Forcer un service à recharger les nouveaux secrets</strong>
+    <span class="ctx">Contexte : après rotation d'un secret Swarm</span>
+  </div>
+  <div class="cmd-body">
+    <div class="cmd-why">
+      <code>docker service update --force</code> ne suffit pas pour les env vars (qui viennent du compose). Pour rotater complètement il faut souvent <code>docker stack rm</code> + redeploy.
+    </div>
+    <pre><code class="language-bash">docker service update --force pokclock-api_backup
+# Ou, si état Swarm bloqué :
+docker stack rm pokclock-api
+sleep 20
+docker stack deploy --with-registry-auth -c docker-compose.swarm.prod.yml pokclock-api</code></pre>
+  </div>
+</div>
+
+<h3>7.3 Debug en production</h3>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Suivre les logs d'un service</strong>
+    <span class="ctx">Contexte : diagnostiquer une erreur</span>
+  </div>
+  <div class="cmd-body">
+    <pre><code class="language-bash"># Stream temps réel (Ctrl+C pour sortir)
+docker service logs -f --since 5m pokclock-api_api
+
+# Dump fixe (utile dans une pipe)
+docker service logs --since 30m pokclock-api_api 2>&1 | tail -100
+
+# Logs directs d'un container précis (bypass Swarm)
+CID=$(docker ps -q -f name=pokclock-api_api | head -1)
+docker logs --tail 200 $CID</code></pre>
+  </div>
+</div>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Inspecter un service</strong>
+    <span class="ctx">Contexte : vérifier env vars, secrets, image</span>
+  </div>
+  <div class="cmd-body">
+    <pre><code class="language-bash"># Liste des env vars effectives
+docker service inspect pokclock-api_api \
+  --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}'
+
+# Image actuellement déployée (avec digest)
+docker service inspect pokclock-api_api \
+  --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'
+
+# Tâches récentes (Running + Shutdown récents)
+docker service ps pokclock-api_api --no-trunc | head -10</code></pre>
+  </div>
+</div>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Tester l'API en prod</strong>
+    <span class="ctx">Contexte : santé + auth chain</span>
+  </div>
+  <div class="cmd-body">
+    <pre><code class="language-bash">curl -i https://api.pokclock.com/api/health
+curl -s https://api.pokclock.com/.well-known/jwks.json | jq
+
+# Test auth chain (fake credentials)
+curl -s -i -X POST https://api.pokclock.com/api/auth/issue \
+  -H 'Content-Type: application/json' \
+  -d '{"licenseKey":"FAKE","hardwareId":"FAKE","workerToken":"FAKE"}'</code></pre>
+    <div class="cmd-out">Health attendu : <span class="s2xx">HTTP 200</span>
+{"build":"latest","status":"ok"}
+
+Auth fake attendu : <span class="s4xx">HTTP 401</span>
+{"error":"license_invalid","reason":"bad_signature"}</div>
+  </div>
+</div>
+
+<h3>7.4 Backup &amp; restauration</h3>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Lister les snapshots existants</strong>
+    <span class="ctx">Contexte : avant restauration ou audit</span>
+  </div>
+  <div class="cmd-body">
+    <pre><code class="language-bash">BACKUP_CID=$(docker ps -q -f name=pokclock-api_backup | head -1)
+docker exec $BACKUP_CID sh -c '
+  RESTIC_PASSWORD=$(cat /run/secrets/restic_password) \
+  AWS_ACCESS_KEY_ID=$(cat /run/secrets/r2_backups_access_key) \
+  AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/r2_backups_secret_key) \
+  RESTIC_REPOSITORY="s3:https://49d98f0598fa02b2d27edf1e37601e06.r2.cloudflarestorage.com/pokclock-backups" \
+  restic snapshots
+'</code></pre>
+  </div>
+</div>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Forcer un backup immédiat (hors cycle 24h)</strong>
+    <span class="ctx">Contexte : avant une migration risquée</span>
+  </div>
+  <div class="cmd-body">
+    <div class="cmd-why">
+      Le service tourne en sleep 86400s entre chaque backup. Redémarrer le container relance le cycle immédiatement (pg_dump + upload restic).
+    </div>
+    <pre><code class="language-bash">docker service update --force pokclock-api_backup
+sleep 25
+docker service logs --tail 50 pokclock-api_backup</code></pre>
+  </div>
+</div>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Restaurer un snapshot</strong>
+    <span class="ctx">Contexte : reprise après incident</span>
+  </div>
+  <div class="cmd-body">
+    <pre><code class="language-bash"># 1. Récupérer le dump dans /tmp/restore
+docker exec $BACKUP_CID sh -c '
+  RESTIC_PASSWORD=$(cat /run/secrets/restic_password) \
+  AWS_ACCESS_KEY_ID=$(cat /run/secrets/r2_backups_access_key) \
+  AWS_SECRET_ACCESS_KEY=$(cat /run/secrets/r2_backups_secret_key) \
+  RESTIC_REPOSITORY="s3:https://...pokclock-backups" \
+  restic restore SNAPSHOT_ID --target /tmp/restore
+'
+
+# 2. Copier le .dump hors du container backup
+docker cp $BACKUP_CID:/tmp/restore/tmp/pokclock-XXX.dump /tmp/
+
+# 3. Réinjecter dans Postgres
+PG_CID=$(docker ps -q -f name=pokclock-api_postgres | head -1)
+docker cp /tmp/pokclock-XXX.dump $PG_CID:/tmp/
+docker exec $PG_CID pg_restore -U pokclock -d pokclock -c /tmp/pokclock-XXX.dump</code></pre>
+  </div>
+</div>
+
+<h3>7.5 Rotation de secrets Swarm</h3>
+
+<div class="cmd">
+  <div class="cmd-header">
+    <strong>Rotation propre d'un secret en use</strong>
+    <span class="ctx">Contexte : token compromis ou expiré</span>
+  </div>
+  <div class="cmd-body">
+    <div class="cmd-why">
+      <code>docker secret rm</code> refuse si un service l'utilise. La rotation passe par : <code>docker stack rm</code> (libère les bindings), <code>docker secret rm/create</code>, <code>docker stack deploy</code>. Les volumes et autres secrets externes survivent.
+    </div>
+    <pre><code class="language-bash"># 1. Tear down du stack
+docker stack rm pokclock-api
+sleep 20
+docker service ls | grep pokclock-api && echo "STILL THERE" || echo "OK"
+
+# 2. Supprimer et recréer le secret
+docker secret rm r2_backups_access_key
+printf "Access Key ID: " ; read -s AK ; echo " (len=${#AK})"
+echo -n "$AK" | docker secret create r2_backups_access_key -
+unset AK
+
+# 3. Redéploy
+cd /data/pokclock-api
+docker stack deploy --with-registry-auth -c docker-compose.swarm.prod.yml pokclock-api</code></pre>
+  </div>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Saisie cachée en zsh</strong> : <code>read -p</code> ne marche pas (erreur "no coprocess"). Utilise <code>printf "prompt: " ; read -s VAR ; echo</code> à la place.
+</div>
+</section>
+
+<!-- ============================================================
+     8. PARTICULARITÉS / GOTCHAS
+============================================================ -->
+<section id="gotchas">
+<h2>8. Particularités &amp; pièges connus</h2>
+
+<p>
+Chaque ligne ci-dessous est <strong>un piège qu'on a effectivement rencontré</strong> et résolu durant la Phase 0.A. Si tu vois ces symptômes en revenir, le fix est déjà dans le code — ne re-débugge pas de zéro.
+</p>
+
+<div class="callout callout-danger">
+  <strong>Docker env values ne sont PAS passées dans un shell.</strong>
+  <p>Symptôme : <code>parse pgx config: invalid port ":$(cat "</code></p>
+  <p>Cause : un compose comme <code>DATABASE_URL: "postgres://user:$(cat /run/secrets/...)@..."</code> n'expanse pas <code>$(cat...)</code>. La string est passée littéralement comme env var.</p>
+  <p>Fix : entrypoint inline dans le Dockerfile qui lit le secret en <em>shell</em> et exporte les bonnes vars. Voir <code>Dockerfile</code> lignes ~35-50 (heredoc <code>RUN cat > /app/entrypoint.sh &lt;&lt;'EOF'</code>).</p>
+</div>
+
+<div class="callout callout-danger">
+  <strong>Mot de passe avec caractères spéciaux casse le DSN URL.</strong>
+  <p>Symptôme : <code>invalid port ":&lt;quelque-chose&gt;" after host</code> après que l'entrypoint a lu le secret.</p>
+  <p>Cause : si le password contient <code>:</code>, <code>/</code>, <code>@</code>, <code>?</code>, le parseur URL pgx le découpe au mauvais endroit.</p>
+  <p>Fix : on n'embed PAS le password dans une URL. L'entrypoint exporte <code>PGPASSWORD</code> (var libpq standard, lue nativement par pgx) et construit un DSN au format <em>keyword</em> sans password : <code>host=postgres port=5432 user=pokclock dbname=pokclock sslmode=disable</code>.</p>
+</div>
+
+<div class="callout callout-danger">
+  <strong>L'image <code>restic/restic</code> ne contient pas <code>pg_dump</code>.</strong>
+  <p>Symptôme : container backup exit 127, log <code>/bin/sh: pg_dump: not found</code>.</p>
+  <p>Cause : l'image upstream restic est minimaliste (alpine + restic).</p>
+  <p>Fix immédiat : <code>apk add --no-cache postgresql16-client</code> au boot du container (compose service backup, ~3s overhead).</p>
+  <p>Fix long terme (todo) : construire un <code>Dockerfile.backup</code> dédié qui pré-installe les deux et le pousser sur GHCR.</p>
+</div>
+
+<div class="callout callout-warn">
+  <strong><code>docker stack deploy</code> ne propage pas toujours les changements d'env vars.</strong>
+  <p>Symptôme : nouveau compose pushé, deploy effectué, mais <code>docker service inspect</code> montre encore les anciennes env vars.</p>
+  <p>Cause : état Swarm bloqué à cause d'updates antérieurs en <code>--update-failure-action=pause</code> ou rollbacks répétés.</p>
+  <p>Fix : <code>docker stack rm pokclock-api</code> + <code>sleep 20</code> + redeploy. Les volumes <code>pokclock_pg_data</code> et tous les secrets <code>external: true</code> survivent.</p>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Cloudflare R2 : éditer un token peut rotater la Secret Access Key.</strong>
+  <p>Symptôme : <code>Stat: Unauthorized</code> en boucle alors qu'on a "juste modifié" les permissions.</p>
+  <p>Cause : modifier les permissions d'un token User API peut invalider l'ancienne clé secrète selon les conditions Cloudflare. Comportement non déterministe d'après nos tests.</p>
+  <p>Fix : ne JAMAIS <em>éditer</em> un token R2. Toujours <em>Delete + Create fresh</em>, et bien copier les deux nouvelles clés avant de quitter la page (la Secret Access Key n'est affichée qu'UNE fois).</p>
+</div>
+
+<div class="callout callout-warn">
+  <strong>L'image GHA peut être "cachée stale" lors d'un build.</strong>
+  <p>Symptôme : on ajoute un <code>COPY foo /app/foo</code> dans le Dockerfile, on push, mais l'image résultante sur GHCR ne contient pas <code>/app/foo</code>.</p>
+  <p>Cause : suspectée du cache <code>type=gha</code> qui n'invalide pas correctement le layer COPY (jamais 100% confirmée).</p>
+  <p>Fix : embed le fichier <em>inline</em> dans le Dockerfile via <code>RUN cat > /app/foo &lt;&lt;'EOF' ... EOF</code>. Plus de dépendance à un fichier externe = plus de problème de cache.</p>
+</div>
+
+<div class="callout callout-warn">
+  <strong>Le log middleware affichait <code>status=200</code> pour les 404.</strong>
+  <p>Symptôme : <code>slogMiddleware</code> log <code>200</code> sur <code>/wp-login.php</code> etc., alors que le client reçoit bien un 404 (curl le confirme).</p>
+  <p>Cause : le middleware tourne <em>avant</em> l'<code>HTTPErrorHandler</code> d'Echo, donc <code>res.Status</code> reste à la valeur par défaut (200) quand <code>next()</code> retourne une erreur.</p>
+  <p>Fix : dériver le status depuis <code>*echo.HTTPError</code> via <code>errors.As</code>. Voir <code>internal/api/router.go</code> commit <code>0356d40</code>.</p>
+</div>
+
+<div class="callout">
+  <strong>zsh : <code>read -p</code> n'existe pas.</strong>
+  <p>Symptôme : <code>read: -p: no coprocess</code></p>
+  <p>Fix : <code>printf "prompt: " ; read -s VAR ; echo</code> à la place. Compatible POSIX + zsh + bash.</p>
+</div>
+</section>
+
+<!-- ============================================================
+     9. SÉCURITÉ
+============================================================ -->
+<section id="security">
+<h2>9. Sécurité</h2>
+
+<h3>9.1 Inventaire des secrets Swarm</h3>
+<p>Tous les secrets sont déclarés <code>external: true</code> dans le compose. Ils doivent être créés une fois pour toutes sur le VPS via <code>docker secret create</code>.</p>
+
+<h4>Stack <code>pokclock-api</code></h4>
+<table>
+  <thead><tr><th>Nom du secret</th><th>Contenu</th><th>Utilisé par</th></tr></thead>
+  <tbody>
+    <tr><td><code>pg_password_pokclock</code></td><td>Password Postgres généré (32+ chars)</td><td>api (via entrypoint) + postgres + backup</td></tr>
+    <tr><td><code>jwt_private_pokclock</code></td><td>Clé privée RSA-2048 PEM</td><td>api (Signer.Issue)</td></tr>
+    <tr><td><code>jwt_public_pokclock</code></td><td>Clé publique RSA-2048 PEM</td><td>api (JWKS + Signer.Verify)</td></tr>
+    <tr><td><code>restic_password</code></td><td>Passphrase chiffrement restic (32+ chars)</td><td>backup</td></tr>
+    <tr><td><code>r2_backups_access_key</code></td><td>R2 Access Key ID (32 chars)</td><td>backup</td></tr>
+    <tr><td><code>r2_backups_secret_key</code></td><td>R2 Secret Access Key (64 chars)</td><td>backup</td></tr>
+  </tbody>
+</table>
+
+<h4>Stack <code>traefik</code> (pokclock-infra)</h4>
+<table>
+  <thead><tr><th>Nom du secret</th><th>Contenu</th></tr></thead>
+  <tbody>
+    <tr><td><code>ovh_application_key</code></td><td>OVH API Application Key</td></tr>
+    <tr><td><code>ovh_application_secret</code></td><td>OVH API Application Secret</td></tr>
+    <tr><td><code>ovh_consumer_key</code></td><td>OVH API Consumer Key</td></tr>
+    <tr><td><code>ovh_endpoint</code></td><td><code>ovh-eu</code></td></tr>
+  </tbody>
+</table>
+
+<h3>9.2 JWT keypair</h3>
+<ul>
+  <li><strong>Algorithme</strong> : RS256 (RSA-2048)</li>
+  <li><strong>Clé privée</strong> : <code>jwt_private_pokclock</code> en secret Swarm, jamais en clair sur disque</li>
+  <li><strong>Clé publique</strong> : exposée publiquement via <code>/.well-known/jwks.json</code> (kid calculé via SHA-256 du modulus)</li>
+  <li><strong>Backup hors backup</strong> : la clé privée n'est PAS dans pg_dump. Si tu perds le secret Swarm, tous les JWT émis deviennent invalides. À sauvegarder séparément (gestionnaire de mots de passe perso, p.ex.) en cas de réinstall complet.</li>
+</ul>
+
+<h3>9.3 Rate limiting</h3>
+<ul>
+  <li><code>/api/auth/issue</code> et <code>/api/auth/refresh</code> : <strong>10 requêtes/min/IP</strong> via Echo <code>RateLimiter</code> mémoire</li>
+  <li>Le reste des endpoints n'est pas rate-limité côté API (Traefik peut le faire au niveau réseau si besoin)</li>
+</ul>
+
+<h3>9.4 Isolation réseau</h3>
+<ul>
+  <li><strong>nw-web</strong> : overlay partagé avec Traefik. Seul l'API y est exposé.</li>
+  <li><strong>nw-pokclock</strong> : overlay interne au stack. Postgres et backup n'y sont PAS accessibles depuis l'extérieur. Pas de <code>ports:</code> exposé sur l'host.</li>
+</ul>
+
+<h3>9.5 CORS</h3>
+<p>Configuré dans <code>config.go</code> via <code>ALLOWED_ORIGINS</code>. En prod : <code>https://pokclock.com,https://www.pokclock.com</code>. L'app WPF desktop n'envoie pas d'origin → CORS ne s'applique pas, seuls les browsers sont concernés.</p>
+
+<h3>9.6 Audit log immuable</h3>
+<p>Toutes les modifications sur <code>structures</code> écrivent une ligne <code>structures_audit</code> avec : action (CREATE/UPDATE/DELETE), diff jsonb, actor (claim <code>sub</code> du JWT), timestamp. La table audit n'a aucune route d'écriture exposée — uniquement read-only via <code>GET /api/structures/:slug/history</code> (Phase 0.B).</p>
+</section>
+
+<!-- ============================================================
+     10. ROADMAP
+============================================================ -->
+<section id="roadmap">
+<h2>10. Roadmap</h2>
+
+<div class="timeline">
+  <div class="timeline-item done">
+    <h4>Phase 0.A — Foundation cloud <span class="tag tag-ok">complete</span></h4>
+    <div class="date">2026-05-22 → 2026-05-24</div>
+    <ul>
+      <li>Bootstrap repos pokclock-api + pokclock-infra</li>
+      <li>API Echo + JWT RS256 + Worker /verify branché</li>
+      <li>Postgres + Goose migrations</li>
+      <li>Backup restic vers R2 quotidien</li>
+      <li>GHA Build &amp; Deploy pipeline complet</li>
+      <li>TLS Let's Encrypt via OVH DNS-01</li>
+    </ul>
+  </div>
+
+  <div class="timeline-item todo">
+    <h4>Phase 0.B — Client integration + tests <span class="tag tag-todo">à démarrer</span></h4>
+    <div class="date">À planifier</div>
+    <ul>
+      <li>Branchement <code>RemoteToken</code> depuis <code>license.json</code> côté WPF</li>
+      <li>Tests httptest sur <code>/api/auth/issue</code> avec Worker mocké</li>
+      <li>Tests testcontainers Postgres pour <code>/api/structures</code></li>
+      <li>Coverage ≥ 50%</li>
+      <li>Endpoint <code>GET /api/structures/:slug/history</code> (lecture audit log)</li>
+    </ul>
+  </div>
+
+  <div class="timeline-item todo">
+    <h4>Phase 0.C — Hardening + monitoring</h4>
+    <ul>
+      <li>Wildcard cert <code>*.pokclock.com</code> via labels Traefik</li>
+      <li>Dockerfile.backup pré-buildé (élimine apk au boot)</li>
+      <li>Bump golangci-lint v1.63.4 (fix CI rouge)</li>
+      <li>Métriques Prometheus + dashboard Grafana</li>
+      <li>Alerting Discord/email sur backup failed</li>
+    </ul>
+  </div>
+
+  <div class="timeline-item todo">
+    <h4>Phase 1.0 — Multi-club + roles</h4>
+    <ul>
+      <li>Table <code>clubs</code> + association structure ↔ club</li>
+      <li>Claims JWT enrichies (role: admin/croupier/spectator)</li>
+      <li>Middleware RBAC sur les routes structures</li>
+      <li>Endpoint <code>/api/clubs/:id/structures</code></li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================
+     11. GLOSSAIRE
+============================================================ -->
+<section id="glossary">
+<h2>11. Glossaire</h2>
+
+<table>
+  <thead><tr><th>Terme</th><th>Définition</th></tr></thead>
+  <tbody>
+    <tr><td><strong>JWKS</strong></td><td>JSON Web Key Set. Format standard pour publier des clés publiques. Endpoint <code>/.well-known/jwks.json</code>.</td></tr>
+    <tr><td><strong>JWT</strong></td><td>JSON Web Token. Token signé contenant des claims (sub, exp, iat). Ici en RS256.</td></tr>
+    <tr><td><strong>RS256</strong></td><td>RSA Signature with SHA-256. Algorithme asymétrique : signature avec clé privée, vérification avec clé publique.</td></tr>
+    <tr><td><strong>kid</strong></td><td>Key ID dans un JWT/JWKS. Permet d'identifier quelle clé a signé le token quand il y en a plusieurs. Calculé via SHA-256 du modulus.</td></tr>
+    <tr><td><strong>DSN</strong></td><td>Data Source Name. Chaîne de connexion à une DB. Deux formats supportés par pgx : URL (<code>postgres://...</code>) et keyword (<code>host=... user=...</code>).</td></tr>
+    <tr><td><strong>libpq</strong></td><td>Lib C cliente de Postgres. Définit des conventions (env vars <code>PGHOST</code>, <code>PGPASSWORD</code>, etc.) que pgx respecte.</td></tr>
+    <tr><td><strong>DNS-01 / HTTP-01</strong></td><td>Challenges ACME (Let's Encrypt). HTTP-01 = file sur l'host, DNS-01 = record DNS. DNS-01 est requis pour les wildcards.</td></tr>
+    <tr><td><strong>Swarm secret</strong></td><td>Valeur sensible chiffrée par le raft Swarm, montée en read-only dans <code>/run/secrets/&lt;name&gt;</code> à l'intérieur des containers qui l'utilisent.</td></tr>
+    <tr><td><strong>Overlay network</strong></td><td>Réseau Docker virtuel qui s'étend sur plusieurs nodes Swarm. Permet la communication inter-services.</td></tr>
+    <tr><td><strong>GHCR</strong></td><td>GitHub Container Registry. Registry Docker hébergé par GitHub, lié au repo.</td></tr>
+    <tr><td><strong>restic</strong></td><td>Outil de backup chiffré, dédoublonné, compatible S3 et bien d'autres backends.</td></tr>
+    <tr><td><strong>R2</strong></td><td>Object storage de Cloudflare, compatible S3 API, zero egress fee.</td></tr>
+    <tr><td><strong>Goose</strong></td><td>Outil de migrations SQL pour Go. Versions séquentielles, état tracké dans <code>goose_db_version</code>.</td></tr>
+    <tr><td><strong>pgx</strong></td><td>Driver Postgres natif pour Go. Plus performant que <code>database/sql</code>+lib/pq, mais expose une API distincte.</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     12. MAINTENANCE
+============================================================ -->
+<section id="maintenance">
+<h2>12. Maintenance de cette doc</h2>
+
+<div class="callout">
+  <strong>Convention pour Claude (et tout contributeur)</strong>
+  <p>
+    Cette doc est <em>évolutive</em>. À chaque fois qu'un changement non-trivial est apporté au projet (nouvelle route, nouveau service, nouveau piège débugué, changement de schéma DB, rotation d'un pattern), <strong>mettre à jour la section concernée</strong> dans ce fichier.
+  </p>
+</div>
+
+<h3>Où ajouter quoi</h3>
+<table>
+  <thead><tr><th>Type de changement</th><th>Section à éditer</th></tr></thead>
+  <tbody>
+    <tr><td>Nouvel endpoint HTTP</td><td>§4 Cas d'usage (ajouter une carte UC) + §1 État actuel</td></tr>
+    <tr><td>Nouvelle table / migration</td><td>§3 Modèle de données (ERD + table migrations)</td></tr>
+    <tr><td>Bug subtil résolu</td><td>§8 Particularités &amp; pièges (ajouter une callout)</td></tr>
+    <tr><td>Nouvelle commande utile</td><td>§7 Commandes (ajouter une <code>.cmd</code> card)</td></tr>
+    <tr><td>Nouveau secret Swarm</td><td>§9.1 Inventaire des secrets</td></tr>
+    <tr><td>Nouveau pattern adopté</td><td>§5 Design Patterns</td></tr>
+    <tr><td>Avancement phase</td><td>§10 Roadmap (cocher le timeline-item)</td></tr>
+    <tr><td>Nouvelle techno introduite</td><td>§6 Stack technique + §11 Glossaire si jargon nouveau</td></tr>
+  </tbody>
+</table>
+
+<h3>Format des diagrammes</h3>
+<p>
+Tous les diagrammes sont en <a href="https://mermaid.js.org/">Mermaid</a> embedded dans des <code>&lt;div class="mermaid"&gt;</code>. La syntaxe est texte → idéale pour diff et pour Claude qui peut lire/écrire. Pas de PNG, jamais.
+</p>
+
+<h3>Visualisation</h3>
+<p>
+Ouvre simplement <code>docs/index.html</code> dans n'importe quel navigateur moderne. Aucune compilation, aucun serveur. Les CDN Mermaid + highlight.js sont chargés dynamiquement.
+</p>
+
+<h3>Cohérence avec les autres docs</h3>
+<ul>
+  <li><strong>PHASE-0A-PROGRESS.md</strong> (<code>~/workspace/</code>) : tracker chronologique (kanban + changelog). À jour côté événements.</li>
+  <li><strong>docs/index.html</strong> (ce fichier) : référence technique structurée. À jour côté <em>état actuel</em>.</li>
+  <li><strong>README.md</strong> du repo : pitch + démarrage rapide. Minimal.</li>
+  <li><strong>Memory Claude</strong> (<code>~/.claude/projects/.../memory/</code>) : pointeurs cross-session.</li>
+</ul>
+</section>
+
+<div class="doc-meta">
+  pokclock-api · doc technique générée le 2026-05-24 · à maintenir au fil du projet · <a href="https://github.com/cedricleblond35/pokclock-api">repo GitHub</a>
+</div>
+
+</main>
+</div>
+
+<!-- ============================================================
+     SCRIPTS
+============================================================ -->
+<script>
+// Mermaid init (dark theme matching the doc)
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'dark',
+  themeVariables: {
+    background: '#0d1117',
+    primaryColor: '#1f6feb',
+    primaryTextColor: '#c9d1d9',
+    primaryBorderColor: '#30363d',
+    lineColor: '#8b949e',
+    secondaryColor: '#21262d',
+    tertiaryColor: '#161b22',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  },
+  sequence: { actorMargin: 50, boxMargin: 10, mirrorActors: false },
+});
+
+// Highlight.js
+hljs.highlightAll();
+
+// Copy buttons on <pre>
+document.querySelectorAll('pre').forEach(pre => {
+  if (pre.querySelector('.copy-btn')) return;
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.textContent = 'Copy';
+  btn.addEventListener('click', () => {
+    const code = pre.querySelector('code') || pre;
+    navigator.clipboard.writeText(code.innerText).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+    });
+  });
+  pre.appendChild(btn);
+});
+
+// Sidebar active section on scroll
+const sections = document.querySelectorAll('main section[id]');
+const navLinks = document.querySelectorAll('nav a');
+const navByHash = new Map();
+navLinks.forEach(a => navByHash.set(a.getAttribute('href'), a));
+
+function highlightSection() {
+  let current = null;
+  const scrollPos = window.scrollY + 100;
+  sections.forEach(sec => {
+    if (sec.offsetTop <= scrollPos) current = sec.id;
+  });
+  navLinks.forEach(a => a.classList.remove('active'));
+  if (current && navByHash.has('#' + current)) {
+    navByHash.get('#' + current).classList.add('active');
+  }
+}
+window.addEventListener('scroll', highlightSection, { passive: true });
+highlightSection();
+
+// Live search — masque les sections sans match
+const searchInput = document.getElementById('search');
+searchInput.addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) {
+    sections.forEach(s => s.classList.remove('hidden'));
+    navLinks.forEach(a => a.classList.remove('hidden'));
+    return;
+  }
+  sections.forEach(s => {
+    const hit = s.textContent.toLowerCase().includes(q);
+    s.classList.toggle('hidden', !hit);
+    const link = navByHash.get('#' + s.id);
+    if (link) link.classList.toggle('hidden', !hit);
+  });
+});
+</script>
+
+</body>
+</html>
