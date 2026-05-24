@@ -2,6 +2,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -68,6 +69,11 @@ func Mount(e *echo.Echo, d Deps) {
 }
 
 // slogMiddleware logge chaque requête : méthode, path, status, latence, request ID.
+//
+// Le middleware tourne AVANT l'HTTPErrorHandler d'Echo, donc res.Status reste
+// à 200 (valeur par défaut) tant qu'une erreur n'a pas été écrite. On dérive
+// alors le code depuis l'*echo.HTTPError retourné par next() pour que les
+// 404/4xx/5xx apparaissent correctement dans les logs.
 func slogMiddleware(logger *slog.Logger) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -75,10 +81,21 @@ func slogMiddleware(logger *slog.Logger) echo.MiddlewareFunc {
 			err := next(c)
 			req := c.Request()
 			res := c.Response()
+
+			status := res.Status
+			if err != nil {
+				var he *echo.HTTPError
+				if errors.As(err, &he) {
+					status = he.Code
+				} else if status == http.StatusOK {
+					status = http.StatusInternalServerError
+				}
+			}
+
 			logger.Info("http",
 				"method", req.Method,
 				"path", req.URL.Path,
-				"status", res.Status,
+				"status", status,
 				"bytes", res.Size,
 				"rid", res.Header().Get(echo.HeaderXRequestID),
 				"dur_ms", echoSince(start).Milliseconds(),
@@ -87,3 +104,4 @@ func slogMiddleware(logger *slog.Logger) echo.MiddlewareFunc {
 		}
 	}
 }
+
