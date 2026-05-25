@@ -68,23 +68,7 @@ func requireRole(role auth.Role) echo.MiddlewareFunc {
 	}
 }
 
-// requireAnyRole accepte plusieurs rôles (OU logique). Utilisé pour les
-// endpoints accessibles à la fois aux admins de club et au superadmin.
-func requireAnyRole(roles ...auth.Role) echo.MiddlewareFunc {
-	allowed := make(map[auth.Role]struct{}, len(roles))
-	for _, r := range roles {
-		allowed[r] = struct{}{}
-	}
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			claims := ClaimsFromContext(c)
-			if claims == nil {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "not_authenticated"})
-			}
-			if _, ok := allowed[claims.Role]; !ok {
-				return c.JSON(http.StatusForbidden, map[string]string{"error": "insufficient_role"})
-			}
-			return next(c)
-		}
-	}
-}
+// Note : requireAnyRole(roles ...auth.Role) sera réintroduit dès qu'un
+// endpoint multi-rôles existera (typiquement quand on ajoutera les routes
+// /api/clubs/me accessibles à admin OU superadmin du club). Retiré pour
+// l'instant pour ne pas déclencher le linter `unused`.
