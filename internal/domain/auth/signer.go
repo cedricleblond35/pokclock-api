@@ -27,12 +27,49 @@ const (
 	TierPro   Tier = "Pro"
 )
 
+// Role représente le niveau d'autorisation porté par le JWT.
+// member        : utilisateur standard d'un club (croupier, aide)
+// admin         : administrateur d'un club (gère membres, plan, licenses)
+// superadmin    : Cédric — accès cross-clubs + observabilité + infra
+type Role string
+
+const (
+	RoleMember     Role = "member"
+	RoleAdmin      Role = "admin"
+	RoleSuperadmin Role = "superadmin"
+)
+
+// IsValid valide qu'une Role correspond à une des constantes connues.
+func (r Role) IsValid() bool {
+	switch r {
+	case RoleMember, RoleAdmin, RoleSuperadmin:
+		return true
+	}
+	return false
+}
+
 // Claims est le payload du JWT émis par pokclock-api.
 type Claims struct {
 	HardwareID string `json:"hwid"`
 	Tier       Tier   `json:"tier"`
 	LicenseKey string `json:"lk"`
+	// Role et ClubID alimentés par le Worker via /verify. Vide/member par défaut
+	// pour rétro-compat avec les anciens tokens Phase 0.A.
+	Role   Role   `json:"role,omitempty"`
+	ClubID string `json:"club_id,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// IssueParams porte les champs nécessaires à l'émission d'un JWT. Préféré à
+// une longue liste de paramètres positionnels pour rendre les call-sites
+// lisibles et faciliter l'évolution future (ex. ajout d'un Scope).
+type IssueParams struct {
+	LicenseKey string
+	HardwareID string
+	Tier       Tier
+	Role       Role
+	ClubID     string
+	TTL        time.Duration
 }
 
 // Signer encapsule la paire RSA et le KID utilisé pour signer les JWT.
@@ -72,19 +109,31 @@ func NewSigner(privatePath, publicPath string) (*Signer, error) {
 }
 
 // Issue génère un JWT RS256 signé avec une durée de vie de 24h par défaut.
-func (s *Signer) Issue(licenseKey, hardwareID string, tier Tier, ttl time.Duration) (string, error) {
+//
+// Si p.Role est vide, RoleMember est appliqué par défaut. p.ClubID peut être
+// vide tant que le Worker /verify n'expose pas encore ce champ — dans ce cas
+// le middleware RBAC ne pourra pas filtrer par club, ce qui est OK pour les
+// endpoints non-admin.
+func (s *Signer) Issue(p IssueParams) (string, error) {
+	ttl := p.TTL
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
+	role := p.Role
+	if role == "" {
+		role = RoleMember
+	}
 	now := time.Now()
 	claims := Claims{
-		HardwareID: hardwareID,
-		Tier:       tier,
-		LicenseKey: licenseKey,
+		HardwareID: p.HardwareID,
+		Tier:       p.Tier,
+		LicenseKey: p.LicenseKey,
+		Role:       role,
+		ClubID:     p.ClubID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "pokclock-api",
 			Audience:  jwt.ClaimStrings{"pokclock-desktop"},
-			Subject:   licenseKey,
+			Subject:   p.LicenseKey,
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),

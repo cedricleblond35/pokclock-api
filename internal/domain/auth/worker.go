@@ -42,14 +42,26 @@ type VerifyRequest struct {
 //
 // Success (200) :
 //
-//	{ "valid": true, "tier": "Solo|Club|Pro|Trial", "expiresAt": "...", "lastVerifiedAt": "..." }
+//	{
+//	  "valid": true,
+//	  "tier": "Solo|Club|Pro|Trial",
+//	  "role": "member|admin|superadmin",
+//	  "clubId": "uuid",
+//	  "expiresAt": "...",
+//	  "lastVerifiedAt": "..."
+//	}
 //
 // Failure (4xx ou 200 avec valid=false) :
 //
 //	{ "valid": false, "reason": "revoked|expired|no_activation|bad_signature|mismatch|not_activated" }
+//
+// Compat : role et clubId sont optionnels côté Worker (introduits en Phase 0.B).
+// Si absents, l'API émet le JWT avec role=member et clubId vide.
 type VerifyResponse struct {
 	Valid          bool   `json:"valid"`
 	Tier           string `json:"tier,omitempty"`
+	Role           string `json:"role,omitempty"`
+	ClubID         string `json:"clubId,omitempty"`
 	ExpiresAt      string `json:"expiresAt,omitempty"`
 	LastVerifiedAt string `json:"lastVerifiedAt,omitempty"`
 	Reason         string `json:"reason,omitempty"`

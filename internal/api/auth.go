@@ -64,7 +64,19 @@ func (h *authHandler) issue(c echo.Context) error {
 	}
 
 	tier := auth.Tier(verifyResp.Tier)
-	token, err := h.signer.Issue(req.LicenseKey, req.HardwareID, tier, 0)
+	role := auth.Role(verifyResp.Role)
+	if !role.IsValid() {
+		// Worker n'a pas encore exposé `role` (legacy) ou valeur inconnue
+		// → fallback safe sur member.
+		role = auth.RoleMember
+	}
+	token, err := h.signer.Issue(auth.IssueParams{
+		LicenseKey: req.LicenseKey,
+		HardwareID: req.HardwareID,
+		Tier:       tier,
+		Role:       role,
+		ClubID:     verifyResp.ClubID,
+	})
 	if err != nil {
 		h.logger.Error("jwt signing failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "signing_failed"})

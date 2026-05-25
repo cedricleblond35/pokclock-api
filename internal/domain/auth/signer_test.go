@@ -52,7 +52,14 @@ func TestSigner_IssueAndVerify(t *testing.T) {
 		t.Fatalf("NewSigner: %v", err)
 	}
 
-	token, err := signer.Issue("POK-AAAA-BBBB-CCCC-DDDD", "hwid123", auth.TierClub, 1*time.Hour)
+	token, err := signer.Issue(auth.IssueParams{
+		LicenseKey: "POK-AAAA-BBBB-CCCC-DDDD",
+		HardwareID: "hwid123",
+		Tier:       auth.TierClub,
+		Role:       auth.RoleAdmin,
+		ClubID:     "club-uuid-42",
+		TTL:        1 * time.Hour,
+	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -76,6 +83,41 @@ func TestSigner_IssueAndVerify(t *testing.T) {
 	if claims.Subject != "POK-AAAA-BBBB-CCCC-DDDD" {
 		t.Errorf("subject: got %q", claims.Subject)
 	}
+	if claims.Role != auth.RoleAdmin {
+		t.Errorf("role: got %q want admin", claims.Role)
+	}
+	if claims.ClubID != "club-uuid-42" {
+		t.Errorf("club_id: got %q", claims.ClubID)
+	}
+}
+
+func TestSigner_IssueDefaultsRoleToMember(t *testing.T) {
+	dir := t.TempDir()
+	privPath, pubPath := generateKeypairFiles(t, dir)
+	signer, err := auth.NewSigner(privPath, pubPath)
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+
+	token, err := signer.Issue(auth.IssueParams{
+		LicenseKey: "POK-NOROLE",
+		HardwareID: "hw",
+		Tier:       auth.TierSolo,
+		// Pas de Role ni ClubID — doit fallback sur member + empty
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	claims, err := signer.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Role != auth.RoleMember {
+		t.Errorf("default role: got %q want member", claims.Role)
+	}
+	if claims.ClubID != "" {
+		t.Errorf("default club_id: got %q want empty", claims.ClubID)
+	}
 }
 
 func TestSigner_VerifyRejectsTamperedToken(t *testing.T) {
@@ -86,7 +128,12 @@ func TestSigner_VerifyRejectsTamperedToken(t *testing.T) {
 		t.Fatalf("NewSigner: %v", err)
 	}
 
-	token, err := signer.Issue("POK-1", "hw", auth.TierSolo, time.Hour)
+	token, err := signer.Issue(auth.IssueParams{
+		LicenseKey: "POK-1",
+		HardwareID: "hw",
+		Tier:       auth.TierSolo,
+		TTL:        time.Hour,
+	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

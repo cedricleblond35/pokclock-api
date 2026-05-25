@@ -43,3 +43,48 @@ func ClaimsFromContext(c echo.Context) *auth.Claims {
 	}
 	return v
 }
+
+// requireRole rejette les requêtes dont les claims JWT n'ont pas exactement
+// le rôle attendu. À utiliser APRÈS jwtAuthMiddleware dans la chaîne — le
+// middleware suppose que les claims sont déjà en contexte.
+//
+// Renvoie 401 si le contexte n'a pas de claims (middleware mal câblé),
+// 403 si les claims existent mais que le rôle ne correspond pas.
+func requireRole(role auth.Role) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			claims := ClaimsFromContext(c)
+			if claims == nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "not_authenticated"})
+			}
+			if claims.Role != role {
+				return c.JSON(http.StatusForbidden, map[string]string{
+					"error":    "insufficient_role",
+					"required": string(role),
+				})
+			}
+			return next(c)
+		}
+	}
+}
+
+// requireAnyRole accepte plusieurs rôles (OU logique). Utilisé pour les
+// endpoints accessibles à la fois aux admins de club et au superadmin.
+func requireAnyRole(roles ...auth.Role) echo.MiddlewareFunc {
+	allowed := make(map[auth.Role]struct{}, len(roles))
+	for _, r := range roles {
+		allowed[r] = struct{}{}
+	}
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			claims := ClaimsFromContext(c)
+			if claims == nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "not_authenticated"})
+			}
+			if _, ok := allowed[claims.Role]; !ok {
+				return c.JSON(http.StatusForbidden, map[string]string{"error": "insufficient_role"})
+			}
+			return next(c)
+		}
+	}
+}

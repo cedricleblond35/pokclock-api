@@ -66,6 +66,21 @@ func Mount(e *echo.Echo, d Deps) {
 	structuresGroup.POST("", structuresH.create)
 	structuresGroup.GET("/:slug", structuresH.get)
 	structuresGroup.PATCH("/:slug", structuresH.update)
+
+	// /api/admin/* : routes super-admin (cross-clubs), réservées à Cédric.
+	// Double protection : JWT valide + claim role=superadmin.
+	adminGroup := e.Group("/api/admin")
+	adminGroup.Use(jwtAuthMiddleware(d.Signer))
+	adminGroup.Use(requireRole(auth.RoleSuperadmin))
+
+	clubsH := &adminClubsHandler{pool: d.Pool, logger: d.Logger}
+	adminGroup.GET("/clubs", clubsH.list)
+	adminGroup.POST("/clubs", clubsH.create)
+	adminGroup.GET("/clubs/:id", clubsH.get)
+	adminGroup.PATCH("/clubs/:id", clubsH.update)
+	adminGroup.POST("/clubs/:id/suspend", clubsH.suspend)
+	adminGroup.POST("/clubs/:id/unsuspend", clubsH.unsuspend)
+	adminGroup.DELETE("/clubs/:id", clubsH.softDelete)
 }
 
 // slogMiddleware logge chaque requête : méthode, path, status, latence, request ID.

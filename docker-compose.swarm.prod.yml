@@ -67,7 +67,12 @@ services:
         - "traefik.http.routers.pokclock-api.rule=Host(`api.pokclock.com`)"
         - "traefik.http.routers.pokclock-api.tls=true"
         - "traefik.http.routers.pokclock-api.tls.certresolver=ovh-dns"
-        - "traefik.http.routers.pokclock-api.tls.domains[0].main=api.pokclock.com"
+        # Wildcard cert *.pokclock.com — couvrira tous les sous-domaines futurs
+        # (ops, grafana, traefik, console, etc.) sans nouvelle émission.
+        # L'apex pokclock.com est servi séparément par pokclock-react avec son
+        # propre cert HTTP-01 via myresolver — pas de conflit.
+        - "traefik.http.routers.pokclock-api.tls.domains[0].main=*.pokclock.com"
+        - "traefik.http.routers.pokclock-api.tls.domains[0].sans=pokclock.com"
 
   postgres:
     image: postgres:16-alpine
