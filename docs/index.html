@@ -470,10 +470,10 @@ tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
   <h1>pokclock-api · Documentation technique</h1>
   <p>Backend Go/Echo pour les fonctionnalités cloud de PokClock — license, JWT, sync, audit, backups quotidiens.</p>
   <div class="meta">
-    <span><strong>Statut</strong> Phase 0.A complète</span>
+    <span><strong>Statut</strong> Phase 0.A complète · Phase 0.B Étape 3 (backend RBAC) terminée</span>
     <span><strong>Live</strong> <a href="https://api.pokclock.com/api/health">api.pokclock.com</a></span>
     <span><strong>Repo</strong> cedricleblond35/pokclock-api</span>
-    <span><strong>Dernière maj</strong> 2026-05-24</span>
+    <span><strong>Dernière maj</strong> 2026-05-25</span>
   </div>
 </div>
 
@@ -537,8 +537,12 @@ flowchart LR
     <tr><td><span class="hl-orange">Postgres</span> + migrations Goose</td><td><span class="tag tag-ok">✓</span></td><td>2 tables, version 2</td></tr>
     <tr><td><span class="hl-purple">Backup restic</span> → R2</td><td><span class="tag tag-ok">✓</span></td><td>Snapshot <code>241d4c3d</code> · retention <strong>7d / 4w / 6m</strong></td></tr>
     <tr><td>GHA Build &amp; Deploy</td><td><span class="tag tag-ok">✓ vert</span></td><td>Workflow auto sur <code>main</code></td></tr>
-    <tr><td>CI <code>ci.yml</code> (golangci-lint)</td><td><span class="tag tag-todo">⚠ à fixer</span></td><td>v1.61 <span class="hl-red">incompatible Go 1.24</span> → bump v1.63.4</td></tr>
-    <tr><td>Cert wildcard <code>*.pokclock.com</code></td><td><span class="tag tag-later">plus tard</span></td><td>Labels Traefik à ajuster</td></tr>
+    <tr><td>CI <code>ci.yml</code> (golangci-lint)</td><td><span class="tag tag-ok">✓ vert</span></td><td>Bumpé à v1.64.8 (compatible Go 1.24)</td></tr>
+    <tr><td><span class="hl-purple">RBAC</span> JWT claims (role + club_id)</td><td><span class="tag tag-ok">✓</span></td><td>3 rôles : member / admin / superadmin</td></tr>
+    <tr><td>Tables <code>clubs</code> + <code>licenses</code></td><td><span class="tag tag-ok">✓</span></td><td>Migrations 003/004/005</td></tr>
+    <tr><td>Routes <code>/api/admin/*</code></td><td><span class="tag tag-ok">✓</span></td><td>Clubs CRUD + Licenses + Audit (super-admin only)</td></tr>
+    <tr><td>Migration DNS pokclock.com → Cloudflare</td><td><span class="tag tag-todo">en cours</span></td><td>DNSSEC désactivé, attente propagation</td></tr>
+    <tr><td>Cert wildcard <code>*.pokclock.com</code></td><td><span class="tag tag-todo">labels prêts</span></td><td>Effectif après switch Traefik resolver CF DNS-01</td></tr>
   </tbody>
 </table>
 </section>
@@ -637,21 +641,49 @@ sequenceDiagram
 <h3>3.1 Diagramme ER</h3>
 <div class="mermaid">
 erDiagram
+  CLUBS ||--o{ LICENSES : "owns"
+  CLUBS ||--o{ STRUCTURES : "owns optional"
   STRUCTURES ||--o{ STRUCTURES_AUDIT : "tracks changes"
+  CLUBS {
+    uuid id PK
+    text name UK
+    text plan "solo club pro"
+    text email
+    text status "active suspended deleted"
+    text notes
+    timestamptz created_at
+    timestamptz updated_at
+    timestamptz suspended_at
+  }
+  LICENSES {
+    uuid id PK
+    uuid club_id FK
+    text license_key UK
+    text worker_token_hash "SHA-256 hex"
+    text hardware_id
+    text role "member admin superadmin"
+    text status "active revoked expired"
+    timestamptz expires_at
+    timestamptz last_seen_at
+    timestamptz created_at
+    timestamptz updated_at
+    timestamptz revoked_at
+  }
   STRUCTURES {
     uuid id PK
-    text slug UK "URL-friendly"
-    text name "Display name"
-    text kind "tournament cash free"
-    jsonb settings "Blind levels"
+    uuid club_id FK "nullable retro-compat"
+    text slug UK
+    text name
+    text kind "club casino home streamer other"
+    jsonb settings
     timestamptz created_at
-    timestamptz updated_at "auto trigger"
+    timestamptz updated_at
   }
   STRUCTURES_AUDIT {
     uuid id PK
     uuid structure_id FK "ON DELETE CASCADE"
-    text action "CREATE UPDATE DELETE"
-    jsonb changes "Diff before after"
+    text action "created updated deleted"
+    jsonb changes
     text actor "JWT sub claim"
     timestamptz created_at
   }
@@ -664,8 +696,11 @@ Les migrations sont gérées par <a href="https://github.com/pressly/goose"><cod
 <table>
   <thead><tr><th>Version</th><th>Fichier</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td>1</td><td><code>internal/db/migrations/001_structures.sql</code></td><td>Extension <code>uuid-ossp</code>, table <code>structures</code> + trigger <code>updated_at</code></td></tr>
-    <tr><td>2</td><td><code>internal/db/migrations/002_structures_audit.sql</code></td><td>Table <code>structures_audit</code> avec FK CASCADE, indexes <code>(structure_id)</code> et <code>(created_at DESC)</code></td></tr>
+    <tr><td>1</td><td><code>001_structures.sql</code></td><td>Extension <code>uuid-ossp</code>, table <code>structures</code> + trigger <code>set_updated_at()</code></td></tr>
+    <tr><td>2</td><td><code>002_structures_audit.sql</code></td><td>Table <code>structures_audit</code>, FK CASCADE sur structures, index <code>(structure_id)</code> + <code>(created_at DESC)</code></td></tr>
+    <tr><td>3</td><td><code>003_clubs.sql</code></td><td>Table <code>clubs</code> (plan solo/club/pro, status active/suspended/deleted) + indexes status &amp; plan + trigger updated_at</td></tr>
+    <tr><td>4</td><td><code>004_licenses.sql</code></td><td>Table <code>licenses</code> (FK clubs CASCADE, role member/admin/superadmin, worker_token_hash, status active/revoked/expired) + indexes club_id, status, hardware_id partial</td></tr>
+    <tr><td>5</td><td><code>005_structures_club_id.sql</code></td><td><code>ALTER structures ADD club_id</code> (nullable pour rétro-compat Phase 0.A) + index partial</td></tr>
   </tbody>
 </table>
 
@@ -825,6 +860,107 @@ sequenceDiagram
 </div>
 </div>
 
+<!-- UC6 — Admin clubs CRUD -->
+<div class="uc">
+  <h3>UC6 — Gestion super-admin des clubs (CRUD)</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> Cédric (super-admin, JWT <code>role=superadmin</code>)</span>
+    <span><strong>Endpoints</strong> <span class="http-get">GET</span>/<span class="http-post">POST</span>/<span class="http-patch">PATCH</span>/<span class="http-delete">DELETE</span> <span class="path">/api/admin/clubs[/:id]</span></span>
+    <span><strong>Auth</strong> JWT Bearer + middleware <code>requireRole(superadmin)</code></span>
+  </div>
+  <p>
+    Tous les endpoints sont protégés par une double couche : <code>jwtAuthMiddleware</code> (vérifie la signature et l'expiration) puis <code>requireRole(auth.RoleSuperadmin)</code> (vérifie la claim <code>role</code>). Un JWT valide mais avec <code>role=member</code> ou <code>role=admin</code> obtient <span class="s4xx">HTTP 403</span> <code>insufficient_role</code>.
+  </p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant UI as ops.pokclock.com
+  participant API as pokclock-api
+  participant PG as Postgres
+
+  UI->>API: POST /api/admin/clubs Bearer jwt_superadmin
+  API->>API: jwtAuth verify signature + exp
+  API->>API: requireRole superadmin
+  alt role != superadmin
+    API-->>UI: 403 insufficient_role
+  else role == superadmin
+    API->>PG: INSERT INTO clubs name plan status
+    PG-->>API: row inserted
+    API-->>UI: 201 club JSON
+  end
+</div>
+  <p>
+    Opérations supportées sur <code>/api/admin/clubs</code> :
+  </p>
+  <ul>
+    <li><span class="http-get">GET</span> <span class="path">/api/admin/clubs?status=active&amp;q=paris&amp;limit=50&amp;offset=0</span> — liste paginée + filtres</li>
+    <li><span class="http-post">POST</span> <span class="path">/api/admin/clubs</span> — création (<code>{name, plan, email?, notes?}</code>)</li>
+    <li><span class="http-get">GET</span> <span class="path">/api/admin/clubs/:id</span> — détail d'un club</li>
+    <li><span class="http-patch">PATCH</span> <span class="path">/api/admin/clubs/:id</span> — update name/plan/email/notes (status géré séparément)</li>
+    <li><span class="http-post">POST</span> <span class="path">/api/admin/clubs/:id/suspend</span> — passer en status=suspended + suspended_at=now()</li>
+    <li><span class="http-post">POST</span> <span class="path">/api/admin/clubs/:id/unsuspend</span> — réactiver</li>
+    <li><span class="http-delete">DELETE</span> <span class="path">/api/admin/clubs/:id</span> — soft delete (status=deleted, ligne conservée pour audit)</li>
+  </ul>
+</div>
+
+<!-- UC7 — Admin licenses CRUD -->
+<div class="uc">
+  <h3>UC7 — Émission et gestion des licenses</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> Cédric (super-admin)</span>
+    <span><strong>Endpoints</strong> <span class="http-get">GET</span>/<span class="http-post">POST</span> <span class="path">/api/admin/licenses[/:id/revoke]</span></span>
+    <span><strong>Auth</strong> JWT <code>role=superadmin</code></span>
+  </div>
+  <p>
+    Lors de la création, le serveur génère deux secrets : une <code>license_key</code> au format <code>POK-XXXX-XXXX-XXXX-XXXX</code> (base32 lisible) et un <code>worker_token</code> de 32 bytes hex. <strong>Seul le SHA-256 hex du worker_token est stocké en base.</strong> Le clair n'est jamais persisté côté serveur ; il est renvoyé UNE SEULE FOIS dans la réponse <span class="s2xx">HTTP 201</span> et doit être copié immédiatement par l'admin (puis communiqué au client final via un canal sécurisé).
+  </p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant UI as ops.pokclock.com
+  participant API as pokclock-api
+  participant PG as Postgres
+
+  UI->>API: POST /api/admin/licenses Bearer jwt_superadmin clubId role
+  API->>API: jwtAuth + requireRole superadmin
+  API->>API: generate license_key POK-XXXX...
+  API->>API: generate worker_token 32 bytes hex
+  API->>API: hash sha256 token
+  API->>PG: INSERT licenses club_id key hash role expires_at
+  PG-->>API: row inserted
+  API-->>UI: 201 license JSON + licenseKey CLAIR + workerToken CLAIR
+  Note over UI: copy now — never shown again
+</div>
+  <p>
+    <strong>Important pour le futur Worker /verify</strong> : quand le Worker recevra <code>(licenseKey, hardwareId, workerToken)</code>, il devra hasher le token reçu en SHA-256 hex et comparer au <code>worker_token_hash</code> en base pour valider. Sans cette étape côté Worker, les licenses générées via cet endpoint ne pourront pas s'auth.
+  </p>
+  <p>
+    Revoke : <span class="http-post">POST</span> <span class="path">/api/admin/licenses/:id/revoke</span> set <code>status=revoked</code> + <code>revoked_at=now()</code>. Idempotent. Le Worker D1 doit être notifié séparément pour invalider côté Cloudflare (Phase 0.B-2).
+  </p>
+</div>
+
+<!-- UC8 — Audit search -->
+<div class="uc">
+  <h3>UC8 — Recherche dans l'audit log cross-clubs</h3>
+  <div class="meta">
+    <span><strong>Acteur</strong> Cédric (super-admin)</span>
+    <span><strong>Endpoint</strong> <span class="http-get">GET</span> <span class="path">/api/admin/audit</span></span>
+    <span><strong>Auth</strong> JWT <code>role=superadmin</code></span>
+  </div>
+  <p>
+    Recherche full filtres dans <code>structures_audit</code> avec jointure sur <code>structures</code> pour ramener le slug / nom de structure et le <code>club_id</code> de chaque action. Utile pour le support client (« qui a modifié la structure X et quand »).
+  </p>
+  <p>Filtres disponibles (query params, tous optionnels) :</p>
+  <ul>
+    <li><code>?clubId=&lt;uuid&gt;</code> — restreint au club donné</li>
+    <li><code>?actor=&lt;text&gt;</code> — filtre exact sur l'acteur (claim sub du JWT du croupier)</li>
+    <li><code>?action=created|updated|deleted</code></li>
+    <li><code>?from=&lt;RFC3339&gt;</code> et <code>?to=&lt;RFC3339&gt;</code> — bornes temporelles</li>
+    <li><code>?structureId=&lt;uuid&gt;</code> — historique d'une structure précise</li>
+    <li><code>?limit&amp;offset</code> — pagination (default 100, max 500)</li>
+  </ul>
+</div>
+
 <!-- UC5 -->
 <div class="uc">
   <h3>UC5 — Restauration d'un backup</h3>
@@ -932,6 +1068,14 @@ sequenceDiagram
 </div>
 
 <h3>5.3 Patterns Comportementaux</h3>
+
+<div class="pattern">
+  <div class="name">Role-Based Guard (middleware factory)</div>
+  <div class="where">internal/api/middleware.go (requireRole, requireAnyRole)</div>
+  <p>
+    Factory de middleware qui retourne un guard sur le rôle JWT. Pattern Factory côté retour, Chain of Responsibility côté usage. Le middleware lit les claims depuis le contexte (déposés par <code>jwtAuthMiddleware</code> en amont), compare au rôle requis, court-circuite avec <span class="s4xx">403</span> si insuffisant. Permet d'écrire <code>group.Use(requireRole(auth.RoleSuperadmin))</code> sans répéter la logique dans chaque handler.
+  </p>
+</div>
 
 <div class="pattern">
   <div class="name">Chain of Responsibility (pipeline Echo)</div>
@@ -1369,23 +1513,55 @@ Chaque ligne ci-dessous est <strong>un piège qu'on a effectivement rencontré</
   <li><strong>Backup hors backup</strong> : la clé privée n'est PAS dans pg_dump. Si tu perds le secret Swarm, tous les JWT émis deviennent invalides. À sauvegarder séparément (gestionnaire de mots de passe perso, p.ex.) en cas de réinstall complet.</li>
 </ul>
 
-<h3>9.3 Rate limiting</h3>
+<h3>9.3 RBAC — rôles et middleware</h3>
+<p>
+Le JWT porte une claim <code>role</code> avec trois valeurs possibles :
+</p>
+<table>
+  <thead><tr><th>Rôle</th><th>Audience</th><th>Peut</th></tr></thead>
+  <tbody>
+    <tr><td><span class="hl-blue">member</span></td><td>Croupier / utilisateur standard</td><td>CRUD structures de SON club uniquement</td></tr>
+    <tr><td><span class="hl-orange">admin</span></td><td>Admin d'un club (président, gérant)</td><td>Tout ce qu'un member peut + gestion membres + plan + licenses du club</td></tr>
+    <tr><td><span class="hl-red">superadmin</span></td><td>Cédric uniquement</td><td>Tout, cross-clubs, accès <code>/api/admin/*</code></td></tr>
+  </tbody>
+</table>
+<p>
+Middlewares dans <code>internal/api/middleware.go</code> :
+</p>
+<ul>
+  <li><code>requireRole(role)</code> — exige exactement ce rôle. 401 si non authentifié, 403 si rôle insuffisant.</li>
+  <li><code>requireAnyRole(roles...)</code> — OU logique pour endpoints multi-rôles (ex: <code>admin</code> OR <code>superadmin</code>).</li>
+</ul>
+<p>
+Toutes les routes <code>/api/admin/*</code> sont protégées par <code>jwtAuth + requireRole(superadmin)</code>. Double couche pour défense en profondeur : un JWT valide mais avec un rôle inférieur est rejeté avant d'atteindre le handler.
+</p>
+
+<h3>9.4 Rate limiting</h3>
 <ul>
   <li><code>/api/auth/issue</code> et <code>/api/auth/refresh</code> : <strong>10 requêtes/min/IP</strong> via Echo <code>RateLimiter</code> mémoire</li>
   <li>Le reste des endpoints n'est pas rate-limité côté API (Traefik peut le faire au niveau réseau si besoin)</li>
 </ul>
 
-<h3>9.4 Isolation réseau</h3>
+<h3>9.5 Isolation réseau</h3>
 <ul>
   <li><strong>nw-web</strong> : overlay partagé avec Traefik. Seul l'API y est exposé.</li>
   <li><strong>nw-pokclock</strong> : overlay interne au stack. Postgres et backup n'y sont PAS accessibles depuis l'extérieur. Pas de <code>ports:</code> exposé sur l'host.</li>
 </ul>
 
-<h3>9.5 CORS</h3>
+<h3>9.6 CORS</h3>
 <p>Configuré dans <code>config.go</code> via <code>ALLOWED_ORIGINS</code>. En prod : <code>https://pokclock.com,https://www.pokclock.com</code>. L'app WPF desktop n'envoie pas d'origin → CORS ne s'applique pas, seuls les browsers sont concernés.</p>
 
-<h3>9.6 Audit log immuable</h3>
-<p>Toutes les modifications sur <code>structures</code> écrivent une ligne <code>structures_audit</code> avec : action (CREATE/UPDATE/DELETE), diff jsonb, actor (claim <code>sub</code> du JWT), timestamp. La table audit n'a aucune route d'écriture exposée — uniquement read-only via <code>GET /api/structures/:slug/history</code> (Phase 0.B).</p>
+<h3>9.7 Audit log immuable</h3>
+<p>Toutes les modifications sur <code>structures</code> écrivent une ligne <code>structures_audit</code> avec : action (created/updated/deleted), diff jsonb, actor (claim <code>sub</code> du JWT), timestamp. La table audit n'a aucune route d'écriture exposée. Lecture en mode super-admin via <span class="http-get">GET</span> <span class="path">/api/admin/audit</span> (recherche full filtres cross-clubs).</p>
+
+<h3>9.8 Génération &amp; stockage des license_keys / worker_tokens</h3>
+<p>Quand un super-admin crée une license via <span class="http-post">POST</span> <span class="path">/api/admin/licenses</span> :</p>
+<ul>
+  <li><strong>license_key</strong> : format <code>POK-XXXX-XXXX-XXXX-XXXX</code> (4 groupes de 4 chars base32 sans I/O/0/1). Stockée en clair en base — c'est l'identifiant humain.</li>
+  <li><strong>worker_token</strong> : 32 bytes <code>crypto/rand</code>, encodés en 64 chars hex. <span class="hl-red"><strong>JAMAIS stocké en clair.</strong></span> On stocke uniquement son SHA-256 hex dans <code>licenses.worker_token_hash</code>.</li>
+  <li>Les deux valeurs en clair sont renvoyées <strong>UNE SEULE FOIS</strong> dans la réponse <span class="s2xx">HTTP 201</span>. Si l'admin ne les copie pas, elles sont perdues — on peut générer une nouvelle license mais pas récupérer celle-ci.</li>
+  <li>Côté Worker Cloudflare <code>/verify</code> (Phase 0.B-2) : pour valider un appel, hasher le <code>workerToken</code> reçu en SHA-256 hex et comparer au <code>worker_token_hash</code> en base. Égalité = OK.</li>
+</ul>
 </section>
 
 <!-- ============================================================
@@ -1408,15 +1584,42 @@ Chaque ligne ci-dessous est <strong>un piège qu'on a effectivement rencontré</
     </ul>
   </div>
 
+  <div class="timeline-item done">
+    <h4>Phase 0.B Étape 3 — Backend RBAC + admin endpoints <span class="tag tag-ok">complete</span></h4>
+    <div class="date">2026-05-25</div>
+    <ul>
+      <li>Migrations 003/004/005 : tables <code>clubs</code> + <code>licenses</code> + <code>structures.club_id</code></li>
+      <li>JWT claims enrichies : <code>role</code> (member/admin/superadmin) + <code>club_id</code></li>
+      <li>Refactor <code>Signer.Issue(IssueParams{})</code> pour lisibilité</li>
+      <li>Middlewares <code>requireRole</code> + <code>requireAnyRole</code></li>
+      <li><code>/api/admin/clubs/*</code> : list, get, create, update, suspend, unsuspend, softDelete</li>
+      <li><code>/api/admin/licenses/*</code> : list, create (license_key + worker_token générés, hash SHA-256 stocké), revoke</li>
+      <li><code>/api/admin/audit</code> : recherche cross-clubs avec filtres clubId/actor/action/dates</li>
+    </ul>
+  </div>
+
   <div class="timeline-item todo">
-    <h4>Phase 0.B — Client integration + tests <span class="tag tag-todo">à démarrer</span></h4>
+    <h4>Phase 0.B Étape 4 — Worker Cloudflare + WPF integration <span class="tag tag-todo">à démarrer</span></h4>
     <div class="date">À planifier</div>
     <ul>
+      <li>Modifier le Worker <code>/verify</code> pour exposer <code>role</code> + <code>clubId</code> dans la réponse</li>
+      <li>Modifier le Worker pour hasher en SHA-256 hex le <code>workerToken</code> reçu et matcher contre <code>worker_token_hash</code> en base (pour les licenses générées par <code>/api/admin/licenses</code>)</li>
       <li>Branchement <code>RemoteToken</code> depuis <code>license.json</code> côté WPF</li>
       <li>Tests httptest sur <code>/api/auth/issue</code> avec Worker mocké</li>
-      <li>Tests testcontainers Postgres pour <code>/api/structures</code></li>
+      <li>Tests testcontainers Postgres pour <code>/api/admin/*</code></li>
       <li>Coverage ≥ 50%</li>
-      <li>Endpoint <code>GET /api/structures/:slug/history</code> (lecture audit log)</li>
+    </ul>
+  </div>
+
+  <div class="timeline-item todo">
+    <h4>Phase 0.B Étape 5 — UI admin <code>ops.pokclock.com</code></h4>
+    <ul>
+      <li>Migration DNS pokclock.com OVH → Cloudflare (en cours)</li>
+      <li>Cloudflare Access OAuth Google sur <code>ops.pokclock.com</code> + <code>grafana.pokclock.com</code></li>
+      <li>Stack monitoring Grafana + Loki + Promtail + Prometheus + cAdvisor + node-exporter</li>
+      <li>Wildcard cert <code>*.pokclock.com</code> + switch Traefik resolver vers Cloudflare DNS-01</li>
+      <li>Skeleton Next.js <code>pokclock-ops</code> (sidebar, topbar, dashboard avec iframes Grafana)</li>
+      <li>Pages Clubs / Licenses / Audit consommant <code>/api/admin/*</code></li>
     </ul>
   </div>
 
