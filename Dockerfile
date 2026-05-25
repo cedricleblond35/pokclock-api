@@ -21,6 +21,14 @@ RUN go build \
     -ldflags="-s -w -X main.buildSHA=${BUILD_SHA}" \
     -o /out/api ./cmd/api
 
+# Build du CLI issue-jwt : outil de bootstrap pour émettre un JWT super-admin
+# directement avec le Signer, sans passer par le Worker /verify. Utile pour
+# bootstrap initial du secret pokclock_api_admin_jwt côté pokclock-ops.
+RUN go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/issue-jwt ./cmd/issue-jwt
+
 ### Stage 2 — runtime #########################################################
 FROM alpine:3.20 AS runtime
 RUN apk add --no-cache ca-certificates tzdata \
@@ -29,6 +37,7 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 WORKDIR /app
 COPY --from=builder --chown=app:app /out/api /app/api
+COPY --from=builder --chown=app:app /out/issue-jwt /app/issue-jwt
 
 # Entrypoint embedded inline so the image build never depends on a context file.
 # Reads password from PG_PASSWORD_FILE and exports it as PGPASSWORD (libpq env
