@@ -81,6 +81,14 @@ func Mount(e *echo.Echo, d Deps) {
 	adminGroup.POST("/clubs/:id/suspend", clubsH.suspend)
 	adminGroup.POST("/clubs/:id/unsuspend", clubsH.unsuspend)
 	adminGroup.DELETE("/clubs/:id", clubsH.softDelete)
+
+	licensesH := &adminLicensesHandler{pool: d.Pool, logger: d.Logger}
+	adminGroup.GET("/licenses", licensesH.list)
+	adminGroup.POST("/licenses", licensesH.create)
+	adminGroup.POST("/licenses/:id/revoke", licensesH.revoke)
+
+	auditH := &adminAuditHandler{pool: d.Pool, logger: d.Logger}
+	adminGroup.GET("/audit", auditH.search)
 }
 
 // slogMiddleware logge chaque requête : méthode, path, status, latence, request ID.
