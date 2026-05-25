@@ -65,13 +65,18 @@ func main() {
 	e.HidePort = true
 
 	apihttp.Mount(e, apihttp.Deps{
-		BuildSHA:        buildSHA,
-		Pool:            pool,
-		Signer:          signer,
-		WorkerClient:    workerClient,
-		AllowedOrigins:  cfg.AllowedOrigins,
-		Logger:          logger,
+		BuildSHA:              buildSHA,
+		Pool:                  pool,
+		Signer:                signer,
+		WorkerClient:          workerClient,
+		AllowedOrigins:        cfg.AllowedOrigins,
+		Logger:                logger,
+		SuperadminLicenseKeys: cfg.SuperadminLicenseKeys,
 	})
+
+	if n := len(cfg.SuperadminLicenseKeys); n > 0 {
+		logger.Info("bootstrap superadmin keys configured", "count", n)
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

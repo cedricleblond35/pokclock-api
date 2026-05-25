@@ -21,6 +21,11 @@ type Deps struct {
 	WorkerClient   *auth.WorkerClient
 	AllowedOrigins []string
 	Logger         *slog.Logger
+	// SuperadminLicenseKeys : bootstrap mechanism. Si la licence du caller est
+	// dans ce set, le handler /api/auth/issue émet le JWT avec role=superadmin
+	// même si le Worker /verify n'a pas (encore) propagé ce rôle. Vide en local
+	// dev / dans les tests par défaut.
+	SuperadminLicenseKeys map[string]struct{}
 }
 
 // Mount monte toutes les routes et middlewares sur l'instance Echo passée.
@@ -47,9 +52,10 @@ func Mount(e *echo.Echo, d Deps) {
 	})
 
 	authH := &authHandler{
-		signer:       d.Signer,
-		workerClient: d.WorkerClient,
-		logger:       d.Logger,
+		signer:                d.Signer,
+		workerClient:          d.WorkerClient,
+		logger:                d.Logger,
+		superadminLicenseKeys: d.SuperadminLicenseKeys,
 	}
 	authGroup := e.Group("/api/auth")
 	// Rate-limit dur sur les endpoints auth : 10 req/min par IP.

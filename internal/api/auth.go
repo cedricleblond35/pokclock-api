@@ -14,6 +14,10 @@ type authHandler struct {
 	signer       *auth.Signer
 	workerClient *auth.WorkerClient
 	logger       *slog.Logger
+	// superadminLicenseKeys : bootstrap Phase 0.B. Si la licence est dans ce
+	// set, on force role=superadmin dans le JWT émis. À retirer une fois
+	// que le Worker /verify renvoie role dans sa réponse.
+	superadminLicenseKeys map[string]struct{}
 }
 
 type issueRequest struct {
@@ -69,6 +73,13 @@ func (h *authHandler) issue(c echo.Context) error {
 		// Worker n'a pas encore exposé `role` (legacy) ou valeur inconnue
 		// → fallback safe sur member.
 		role = auth.RoleMember
+	}
+	// Override bootstrap Phase 0.B : promotion explicite en superadmin via
+	// env SUPERADMIN_LICENSE_KEYS. À retirer quand le Worker propage role.
+	if _, ok := h.superadminLicenseKeys[req.LicenseKey]; ok {
+		role = auth.RoleSuperadmin
+		h.logger.Info("license promoted to superadmin via env bootstrap",
+			"license_prefix", req.LicenseKey[:min(8, len(req.LicenseKey))])
 	}
 	token, err := h.signer.Issue(auth.IssueParams{
 		LicenseKey: req.LicenseKey,
