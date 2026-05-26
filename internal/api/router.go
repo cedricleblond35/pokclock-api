@@ -95,6 +95,7 @@ func Mount(e *echo.Echo, d Deps) {
 
 	clubInfoH := &clubInfoHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/info", clubInfoH.get)
+	clubGroup.PATCH("/online-registrations", clubInfoH.updateOnlineRegistrationsFlag)
 
 	clubLicensesH := &clubLicensesHandler{
 		pool:        d.Pool,
@@ -117,6 +118,26 @@ func Mount(e *echo.Echo, d Deps) {
 
 	clubAuditH := &clubAuditHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/audit", clubAuditH.search)
+
+	// Phase 0.D-α : tournois publiés + modération des inscriptions en ligne.
+	clubTournamentsH := &clubTournamentsHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/tournaments", clubTournamentsH.list)
+	clubGroup.POST("/tournaments", clubTournamentsH.publish)
+	clubGroup.POST("/tournaments/:id/close", clubTournamentsH.setStatus("closed"))
+	clubGroup.POST("/tournaments/:id/cancel", clubTournamentsH.setStatus("cancelled"))
+
+	clubRegistrationsH := &clubRegistrationsHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/tournaments/:tid/registrations", clubRegistrationsH.list)
+	clubGroup.POST("/registrations/:id/confirm", clubRegistrationsH.confirm)
+	clubGroup.POST("/registrations/:id/reject", clubRegistrationsH.reject)
+
+	// /public/* : endpoints anonymes consommés par le site pokclock.com/clubs/:slug.
+	// AUCUNE auth — rate-limit géré en amont (Cloudflare/Traefik).
+	publicGroup := e.Group("/public")
+	publicTournamentsH := &publicTournamentsHandler{pool: d.Pool, logger: d.Logger}
+	publicGroup.GET("/clubs/:slug/tournaments", publicTournamentsH.listByClubSlug)
+	publicGroup.POST("/clubs/:slug/tournaments/:id/register", publicTournamentsH.register)
+	publicGroup.GET("/registrations/:token/cancel", publicTournamentsH.cancelByToken)
 
 	// /api/admin/* : routes super-admin (cross-clubs), réservées à Cédric.
 	// Double protection : JWT valide + claim role=superadmin.

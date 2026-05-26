@@ -120,13 +120,18 @@ type clubInfoHandler struct {
 type clubInfoResponse struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
+	Slug      string          `json:"slug"`
 	Plan      string          `json:"plan"`
 	Email     *string         `json:"email,omitempty"`
 	Status    string          `json:"status"`
 	Notes     *string         `json:"notes,omitempty"`
 	Settings  json.RawMessage `json:"settings,omitempty"`
-	CreatedAt time.Time       `json:"createdAt"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	// Phase 0.D-α : opt-in pour les inscriptions en ligne. Pilote la
+	// visibilité du bouton "Publier en ligne" côté app + la disponibilité
+	// du site public /clubs/:slug.
+	OnlineRegistrationsEnabled bool      `json:"onlineRegistrationsEnabled"`
+	CreatedAt                  time.Time `json:"createdAt"`
+	UpdatedAt                  time.Time `json:"updatedAt"`
 }
 
 func (h *clubInfoHandler) get(c echo.Context) error {
@@ -137,11 +142,12 @@ func (h *clubInfoHandler) get(c echo.Context) error {
 
 	var info clubInfoResponse
 	err := h.pool.QueryRow(c.Request().Context(),
-		`SELECT id, name, plan, email, status, notes, created_at, updated_at
+		`SELECT id, name, slug, plan, email, status, notes, online_registrations_enabled,
+		        created_at, updated_at
 		 FROM clubs WHERE id = $1`,
 		claims.ClubID,
-	).Scan(&info.ID, &info.Name, &info.Plan, &info.Email, &info.Status, &info.Notes,
-		&info.CreatedAt, &info.UpdatedAt)
+	).Scan(&info.ID, &info.Name, &info.Slug, &info.Plan, &info.Email, &info.Status, &info.Notes,
+		&info.OnlineRegistrationsEnabled, &info.CreatedAt, &info.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// claims.ClubID pointe vers un club inexistant — incohérence DB,
@@ -157,4 +163,36 @@ func (h *clubInfoHandler) get(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
 	}
 	return c.JSON(http.StatusOK, info)
+}
+
+// updateOnlineRegistrationsFlagRequest est le body de PATCH /api/club/online-registrations.
+type updateOnlineRegistrationsFlagRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// updateOnlineRegistrationsFlag : toggle l'opt-in inscriptions en ligne.
+// Accessible aux admins du club (le club ne dépend pas du super-admin pour
+// activer cette feature).
+func (h *clubInfoHandler) updateOnlineRegistrationsFlag(c echo.Context) error {
+	claims := ClaimsFromContext(c)
+	if claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "missing_claims"})
+	}
+	var req updateOnlineRegistrationsFlagRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+	}
+
+	tag, err := h.pool.Exec(c.Request().Context(),
+		`UPDATE clubs SET online_registrations_enabled = $2 WHERE id = $1`,
+		claims.ClubID, req.Enabled,
+	)
+	if err != nil {
+		h.logger.Error("update online_registrations_enabled", "err", err, "club_id", claims.ClubID)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
+	}
+	if tag.RowsAffected() == 0 {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "club_not_found"})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"enabled": req.Enabled})
 }
