@@ -105,6 +105,16 @@ func Mount(e *echo.Echo, d Deps) {
 	clubGroup.POST("/licenses", clubLicensesH.create)
 	clubGroup.POST("/licenses/:id/revoke", clubLicensesH.revoke)
 
+	// Phase 0.C-γ partie 3 : CRUD members + assignation membre↔license.
+	clubMembersH := &clubMembersHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/members", clubMembersH.list)
+	clubGroup.POST("/members", clubMembersH.create)
+	clubGroup.PATCH("/members/:id", clubMembersH.update)
+	clubGroup.DELETE("/members/:id", clubMembersH.delete)
+	// Assign membre à une license — chemin sur /licenses/:id/assign-member
+	// pour rester cohérent avec la sémantique (ressource = license).
+	clubGroup.POST("/licenses/:id/assign-member", clubMembersH.assignLicense)
+
 	clubAuditH := &clubAuditHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/audit", clubAuditH.search)
 

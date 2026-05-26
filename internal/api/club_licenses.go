@@ -33,6 +33,10 @@ type clubLicensesHandler struct {
 type clubCreateLicenseRequest struct {
 	Role      string  `json:"role"`
 	ExpiresAt *string `json:"expiresAt,omitempty"`
+	// Phase 0.C-γ partie 3 : rattachement optionnel à un membre du même club.
+	// Si l'UUID ne correspond pas à un membre du club du caller, on rejette
+	// en 400 plutôt que de silencieusement ignorer.
+	MemberID *string `json:"memberId,omitempty"`
 }
 
 func (h *clubLicensesHandler) list(c echo.Context) error {
@@ -46,26 +50,28 @@ func (h *clubLicensesHandler) list(c echo.Context) error {
 	status := strings.TrimSpace(c.QueryParam("status"))
 	role := strings.TrimSpace(c.QueryParam("role"))
 
-	conds := []string{"club_id = $1"}
+	conds := []string{"l.club_id = $1"}
 	args := []any{claims.ClubID}
 	if status != "" {
 		args = append(args, status)
-		conds = append(conds, "status = $"+strconv.Itoa(len(args)))
+		conds = append(conds, "l.status = $"+strconv.Itoa(len(args)))
 	}
 	if role != "" {
 		args = append(args, role)
-		conds = append(conds, "role = $"+strconv.Itoa(len(args)))
+		conds = append(conds, "l.role = $"+strconv.Itoa(len(args)))
 	}
 	args = append(args, limit, offset)
 	limitPos := strconv.Itoa(len(args) - 1)
 	offsetPos := strconv.Itoa(len(args))
 
 	rows, err := h.pool.Query(c.Request().Context(),
-		`SELECT id, club_id, license_key, hardware_id, role, status,
-		        expires_at, last_seen_at, created_at, updated_at, revoked_at
-		 FROM licenses
+		`SELECT l.id, l.club_id, l.license_key, l.hardware_id, l.role, l.status,
+		        l.expires_at, l.last_seen_at, l.created_at, l.updated_at, l.revoked_at,
+		        l.member_id, m.first_name, m.last_name
+		 FROM licenses l
+		 LEFT JOIN members m ON m.id = l.member_id
 		 WHERE `+strings.Join(conds, " AND ")+`
-		 ORDER BY created_at DESC
+		 ORDER BY l.created_at DESC
 		 LIMIT $`+limitPos+` OFFSET $`+offsetPos,
 		args...,
 	)
@@ -79,7 +85,8 @@ func (h *clubLicensesHandler) list(c echo.Context) error {
 	for rows.Next() {
 		var l license
 		if err := rows.Scan(&l.ID, &l.ClubID, &l.LicenseKey, &l.HardwareID, &l.Role, &l.Status,
-			&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt); err != nil {
+			&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt,
+			&l.MemberID, &l.MemberFirstName, &l.MemberLastName); err != nil {
 			h.logger.Error("scan license", "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_scan"})
 		}
@@ -160,6 +167,24 @@ func (h *clubLicensesHandler) create(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "unknown_plan"})
 	}
 
+	// Vérification membre optionnel : doit appartenir au club du caller.
+	var memberIDArg any = nil
+	if req.MemberID != nil && strings.TrimSpace(*req.MemberID) != "" {
+		mid := strings.TrimSpace(*req.MemberID)
+		var count int
+		if err := h.pool.QueryRow(c.Request().Context(),
+			`SELECT COUNT(*) FROM members WHERE id = $1 AND club_id = $2`,
+			mid, claims.ClubID,
+		).Scan(&count); err != nil {
+			h.logger.Error("check member club", "err", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+		}
+		if count == 0 {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "member_not_found"})
+		}
+		memberIDArg = mid
+	}
+
 	licenseKey, err := generateLicenseKey()
 	if err != nil {
 		h.logger.Error("generate license key", "err", err)
@@ -174,13 +199,13 @@ func (h *clubLicensesHandler) create(c echo.Context) error {
 
 	var l license
 	err = h.pool.QueryRow(c.Request().Context(),
-		`INSERT INTO licenses (club_id, license_key, worker_token_hash, role, expires_at)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO licenses (club_id, license_key, worker_token_hash, role, expires_at, member_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id, club_id, license_key, hardware_id, role, status,
-		           expires_at, last_seen_at, created_at, updated_at, revoked_at`,
-		claims.ClubID, licenseKey, tokenHash, req.Role, expiresAt,
+		           expires_at, last_seen_at, created_at, updated_at, revoked_at, member_id`,
+		claims.ClubID, licenseKey, tokenHash, req.Role, expiresAt, memberIDArg,
 	).Scan(&l.ID, &l.ClubID, &l.LicenseKey, &l.HardwareID, &l.Role, &l.Status,
-		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt)
+		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt, &l.MemberID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return c.JSON(http.StatusConflict, map[string]string{"error": "license_key_collision"})
@@ -225,10 +250,10 @@ func (h *clubLicensesHandler) revoke(c echo.Context) error {
 		`UPDATE licenses SET status = 'revoked', revoked_at = now()
 		 WHERE id = $1 AND club_id = $2
 		 RETURNING id, club_id, license_key, hardware_id, role, status,
-		           expires_at, last_seen_at, created_at, updated_at, revoked_at`,
+		           expires_at, last_seen_at, created_at, updated_at, revoked_at, member_id`,
 		id, claims.ClubID,
 	).Scan(&l.ID, &l.ClubID, &l.LicenseKey, &l.HardwareID, &l.Role, &l.Status,
-		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt)
+		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt, &l.MemberID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Soit l'id n'existe pas, soit il appartient à un autre club —

@@ -49,6 +49,12 @@ type license struct {
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
 	RevokedAt       *time.Time `json:"revokedAt,omitempty"`
+	// Phase 0.C-γ partie 3 : rattachement à un membre (optionnel, NULL si
+	// la license n'a pas (encore) été attribuée). Les champs Member* sont
+	// remplis par JOIN dans les list endpoints — pas systématiquement présents.
+	MemberID        *string `json:"memberId,omitempty"`
+	MemberFirstName *string `json:"memberFirstName,omitempty"`
+	MemberLastName  *string `json:"memberLastName,omitempty"`
 }
 
 // createLicenseRequest est le payload d'une création de license côté admin.
@@ -101,15 +107,15 @@ func (h *adminLicensesHandler) list(c echo.Context) error {
 	args := []any{}
 	if clubID != "" {
 		args = append(args, clubID)
-		conds = append(conds, "club_id = $"+strconv.Itoa(len(args)))
+		conds = append(conds, "l.club_id = $"+strconv.Itoa(len(args)))
 	}
 	if status != "" {
 		args = append(args, status)
-		conds = append(conds, "status = $"+strconv.Itoa(len(args)))
+		conds = append(conds, "l.status = $"+strconv.Itoa(len(args)))
 	}
 	if role != "" {
 		args = append(args, role)
-		conds = append(conds, "role = $"+strconv.Itoa(len(args)))
+		conds = append(conds, "l.role = $"+strconv.Itoa(len(args)))
 	}
 	where := ""
 	if len(conds) > 0 {
@@ -120,10 +126,12 @@ func (h *adminLicensesHandler) list(c echo.Context) error {
 	offsetPos := strconv.Itoa(len(args))
 
 	rows, err := h.pool.Query(c.Request().Context(),
-		`SELECT id, club_id, license_key, hardware_id, role, status,
-		        expires_at, last_seen_at, created_at, updated_at, revoked_at
-		 FROM licenses`+where+`
-		 ORDER BY created_at DESC
+		`SELECT l.id, l.club_id, l.license_key, l.hardware_id, l.role, l.status,
+		        l.expires_at, l.last_seen_at, l.created_at, l.updated_at, l.revoked_at,
+		        l.member_id, m.first_name, m.last_name
+		 FROM licenses l
+		 LEFT JOIN members m ON m.id = l.member_id`+where+`
+		 ORDER BY l.created_at DESC
 		 LIMIT $`+limitPos+` OFFSET $`+offsetPos,
 		args...,
 	)
@@ -137,7 +145,8 @@ func (h *adminLicensesHandler) list(c echo.Context) error {
 	for rows.Next() {
 		var l license
 		if err := rows.Scan(&l.ID, &l.ClubID, &l.LicenseKey, &l.HardwareID, &l.Role, &l.Status,
-			&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt); err != nil {
+			&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt,
+			&l.MemberID, &l.MemberFirstName, &l.MemberLastName); err != nil {
 			h.logger.Error("scan license", "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_scan"})
 		}
@@ -228,10 +237,10 @@ func (h *adminLicensesHandler) create(c echo.Context) error {
 		`INSERT INTO licenses (club_id, license_key, worker_token_hash, role, expires_at)
 		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id, club_id, license_key, hardware_id, role, status,
-		           expires_at, last_seen_at, created_at, updated_at, revoked_at`,
+		           expires_at, last_seen_at, created_at, updated_at, revoked_at, member_id`,
 		req.ClubID, licenseKey, tokenHash, req.Role, expiresAt,
 	).Scan(&l.ID, &l.ClubID, &l.LicenseKey, &l.HardwareID, &l.Role, &l.Status,
-		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt)
+		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt, &l.MemberID)
 	if err != nil {
 		if isForeignKeyViolation(err) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "club_not_found"})
@@ -323,10 +332,10 @@ func (h *adminLicensesHandler) revoke(c echo.Context) error {
 		`UPDATE licenses SET status = 'revoked', revoked_at = now()
 		 WHERE id = $1
 		 RETURNING id, club_id, license_key, hardware_id, role, status,
-		           expires_at, last_seen_at, created_at, updated_at, revoked_at`,
+		           expires_at, last_seen_at, created_at, updated_at, revoked_at, member_id`,
 		id,
 	).Scan(&l.ID, &l.ClubID, &l.LicenseKey, &l.HardwareID, &l.Role, &l.Status,
-		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt)
+		&l.ExpiresAt, &l.LastSeenAt, &l.CreatedAt, &l.UpdatedAt, &l.RevokedAt, &l.MemberID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
