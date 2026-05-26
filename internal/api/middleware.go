@@ -68,7 +68,56 @@ func requireRole(role auth.Role) echo.MiddlewareFunc {
 	}
 }
 
-// Note : requireAnyRole(roles ...auth.Role) sera réintroduit dès qu'un
-// endpoint multi-rôles existera (typiquement quand on ajoutera les routes
-// /api/clubs/me accessibles à admin OU superadmin du club). Retiré pour
-// l'instant pour ne pas déclencher le linter `unused`.
+// requireAnyRole accepte les requêtes dont les claims JWT portent l'un des
+// rôles passés. Utilisé pour les routes /api/club/* qui doivent être ouvertes
+// à admin ET superadmin (un super-admin peut agir au nom de n'importe quel
+// club via ses propres claims, voir requireClubScope).
+func requireAnyRole(roles ...auth.Role) echo.MiddlewareFunc {
+	allowed := make(map[auth.Role]struct{}, len(roles))
+	for _, r := range roles {
+		allowed[r] = struct{}{}
+	}
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			claims := ClaimsFromContext(c)
+			if claims == nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "not_authenticated"})
+			}
+			if _, ok := allowed[claims.Role]; !ok {
+				accepted := make([]string, 0, len(roles))
+				for _, r := range roles {
+					accepted = append(accepted, string(r))
+				}
+				return c.JSON(http.StatusForbidden, map[string]string{
+					"error":    "insufficient_role",
+					"accepted": strings.Join(accepted, ","),
+				})
+			}
+			return next(c)
+		}
+	}
+}
+
+// requireClubScope garantit que les claims contiennent un ClubID non vide.
+// Pour les routes /api/club/* : sans club_id dans le JWT, impossible de
+// scope les requêtes — on rejette.
+//
+// Le super-admin global (clubId vide en pratique) doit utiliser /api/admin/*
+// avec un clubId explicite en query/body, pas /api/club/*.
+func requireClubScope() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			claims := ClaimsFromContext(c)
+			if claims == nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "not_authenticated"})
+			}
+			if strings.TrimSpace(claims.ClubID) == "" {
+				return c.JSON(http.StatusForbidden, map[string]string{
+					"error":  "missing_club_scope",
+					"detail": "Cette license n'est rattachée à aucun club. Voir avec le super-admin.",
+				})
+			}
+			return next(c)
+		}
+	}
+}

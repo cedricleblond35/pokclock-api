@@ -65,15 +65,48 @@ func Mount(e *echo.Echo, d Deps) {
 	authGroup.POST("/issue", authH.issue)
 	authGroup.POST("/refresh", authH.refresh)
 
+	// /api/structures/* : routes club-scoped. Accessibles à toute license avec
+	// un club_id dans les claims (member/admin/superadmin). Phase 0.C : le
+	// filtre se fait automatiquement sur claims.ClubID, impossible de voir
+	// les structures d'un autre club.
 	structuresH := &structuresHandler{
 		pool:   d.Pool,
 		logger: d.Logger,
 	}
 	structuresGroup := e.Group("/api/structures")
 	structuresGroup.Use(jwtAuthMiddleware(d.Signer))
+	structuresGroup.Use(requireClubScope())
+	structuresGroup.GET("", structuresH.list)
 	structuresGroup.POST("", structuresH.create)
 	structuresGroup.GET("/:slug", structuresH.get)
 	structuresGroup.PATCH("/:slug", structuresH.update)
+	// DELETE réservé à admin/superadmin pour limiter les suppressions
+	// accidentelles par un dealer.
+	deleteH := structuresGroup.Group("")
+	deleteH.Use(requireAnyRole(auth.RoleAdmin, auth.RoleSuperadmin))
+	deleteH.DELETE("/:slug", structuresH.delete)
+
+	// /api/club/* : routes admin de club (gestion des licenses du club, audit,
+	// infos club). Réservées à admin + superadmin du club, jamais cross-club.
+	clubGroup := e.Group("/api/club")
+	clubGroup.Use(jwtAuthMiddleware(d.Signer))
+	clubGroup.Use(requireClubScope())
+	clubGroup.Use(requireAnyRole(auth.RoleAdmin, auth.RoleSuperadmin))
+
+	clubInfoH := &clubInfoHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/info", clubInfoH.get)
+
+	clubLicensesH := &clubLicensesHandler{
+		pool:        d.Pool,
+		logger:      d.Logger,
+		workerAdmin: d.WorkerAdminClient,
+	}
+	clubGroup.GET("/licenses", clubLicensesH.list)
+	clubGroup.POST("/licenses", clubLicensesH.create)
+	clubGroup.POST("/licenses/:id/revoke", clubLicensesH.revoke)
+
+	clubAuditH := &clubAuditHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/audit", clubAuditH.search)
 
 	// /api/admin/* : routes super-admin (cross-clubs), réservées à Cédric.
 	// Double protection : JWT valide + claim role=superadmin.

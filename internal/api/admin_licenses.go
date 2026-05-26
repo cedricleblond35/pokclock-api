@@ -245,7 +245,7 @@ func (h *adminLicensesHandler) create(c echo.Context) error {
 	}
 
 	// Sync vers Worker (best-effort, ne bloque pas la réponse en cas d'échec).
-	syncStatus, syncErr := h.syncCreateToWorker(c.Request().Context(), workeradmin.CreateLicenseInput{
+	syncStatus, syncErr := syncCreateToWorker(c.Request().Context(), h.workerAdmin, h.logger, workeradmin.CreateLicenseInput{
 		LicenseKey:    licenseKey,
 		Email:         clubEmail,
 		Tier:          tier,
@@ -283,22 +283,8 @@ func (h *adminLicensesHandler) fetchClubEmailAndPlan(ctx context.Context, clubID
 	return strings.TrimSpace(*email), plan, nil
 }
 
-// syncCreateToWorker propage la license vers D1. Best-effort : on retourne
-// le statut ("ok"|"skipped"|"failed") + une erreur formatée, jamais on ne
-// remonte d'erreur au caller HTTP.
-func (h *adminLicensesHandler) syncCreateToWorker(ctx context.Context, in workeradmin.CreateLicenseInput) (string, string) {
-	if h.workerAdmin == nil || !h.workerAdmin.IsConfigured() {
-		return "skipped", ""
-	}
-	if err := h.workerAdmin.CreateLicense(ctx, in); err != nil {
-		h.logger.Error("worker sync create license failed",
-			"err", err, "license_key", in.LicenseKey, "club_id", in.ClubID)
-		return "failed", err.Error()
-	}
-	h.logger.Info("worker sync create license ok",
-		"license_key", in.LicenseKey, "club_id", in.ClubID, "tier", in.Tier, "role", in.Role)
-	return "ok", ""
-}
+// Note : syncCreateToWorker et syncRevokeToWorker (helpers package-level) sont
+// définis dans club_licenses.go pour être partagés entre admin et club handlers.
 
 // expiresInDays convertit un timestamp absolu en nombre de jours restants
 // depuis maintenant. Retourne nil si t est nil (license perpétuelle).
@@ -349,7 +335,7 @@ func (h *adminLicensesHandler) revoke(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
 	}
 
-	syncStatus, syncErr := h.syncRevokeToWorker(c.Request().Context(), l.LicenseKey)
+	syncStatus, syncErr := syncRevokeToWorker(c.Request().Context(), h.workerAdmin, h.logger, l.LicenseKey)
 
 	return c.JSON(http.StatusOK, revokeLicenseResponse{
 		license:    l,
@@ -358,19 +344,6 @@ func (h *adminLicensesHandler) revoke(c echo.Context) error {
 	})
 }
 
-// syncRevokeToWorker propage une révocation vers D1. Best-effort, même
-// politique que syncCreateToWorker.
-func (h *adminLicensesHandler) syncRevokeToWorker(ctx context.Context, licenseKey string) (string, string) {
-	if h.workerAdmin == nil || !h.workerAdmin.IsConfigured() {
-		return "skipped", ""
-	}
-	if err := h.workerAdmin.RevokeLicense(ctx, licenseKey); err != nil {
-		h.logger.Error("worker sync revoke license failed", "err", err, "license_key", licenseKey)
-		return "failed", err.Error()
-	}
-	h.logger.Info("worker sync revoke license ok", "license_key", licenseKey)
-	return "ok", ""
-}
 
 // generateLicenseKey produit une clé du format POK-XXXX-XXXX-XXXX-XXXX
 // (4 groupes base32 sans I/O/0/1 pour lisibilité humaine).

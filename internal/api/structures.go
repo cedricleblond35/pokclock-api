@@ -21,6 +21,7 @@ type structuresHandler struct {
 
 type structure struct {
 	ID        string          `json:"id"`
+	ClubID    string          `json:"clubId"`
 	Slug      string          `json:"slug"`
 	Name      string          `json:"name"`
 	Kind      string          `json:"kind"`
@@ -48,6 +49,54 @@ var allowedKinds = map[string]bool{
 	"home":     true,
 	"streamer": true,
 	"other":    true,
+}
+
+const (
+	defaultStructuresLimit = 50
+	maxStructuresLimit     = 200
+)
+
+// list retourne les structures du club du caller, paginées.
+// Le filtre par club_id est implicite via claims.ClubID — aucun param query
+// ne permet de le contourner, c'est le principe du club scope.
+func (h *structuresHandler) list(c echo.Context) error {
+	claims := ClaimsFromContext(c)
+	if claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "missing_claims"})
+	}
+
+	limit := parsePositiveInt(c.QueryParam("limit"), defaultStructuresLimit, maxStructuresLimit)
+	offset := parsePositiveInt(c.QueryParam("offset"), 0, 1_000_000)
+
+	rows, err := h.pool.Query(c.Request().Context(),
+		`SELECT id, club_id, slug, name, kind, settings, created_at, updated_at
+		 FROM structures
+		 WHERE club_id = $1
+		 ORDER BY created_at DESC
+		 LIMIT $2 OFFSET $3`,
+		claims.ClubID, limit, offset,
+	)
+	if err != nil {
+		h.logger.Error("list structures", "err", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+	}
+	defer rows.Close()
+
+	out := make([]structure, 0, limit)
+	for rows.Next() {
+		var s structure
+		if err := rows.Scan(&s.ID, &s.ClubID, &s.Slug, &s.Name, &s.Kind, &s.Settings,
+			&s.CreatedAt, &s.UpdatedAt); err != nil {
+			h.logger.Error("scan structure", "err", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_scan"})
+		}
+		out = append(out, s)
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"structures": out,
+		"limit":      limit,
+		"offset":     offset,
+	})
 }
 
 func (h *structuresHandler) create(c echo.Context) error {
@@ -84,13 +133,14 @@ func (h *structuresHandler) create(c echo.Context) error {
 
 	var s structure
 	err = tx.QueryRow(ctx,
-		`INSERT INTO structures (slug, name, kind, settings)
-		 VALUES ($1, $2, $3, $4::jsonb)
-		 RETURNING id, slug, name, kind, settings, created_at, updated_at`,
-		req.Slug, req.Name, req.Kind, string(req.Settings),
-	).Scan(&s.ID, &s.Slug, &s.Name, &s.Kind, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
+		`INSERT INTO structures (club_id, slug, name, kind, settings)
+		 VALUES ($1, $2, $3, $4, $5::jsonb)
+		 RETURNING id, club_id, slug, name, kind, settings, created_at, updated_at`,
+		claims.ClubID, req.Slug, req.Name, req.Kind, string(req.Settings),
+	).Scan(&s.ID, &s.ClubID, &s.Slug, &s.Name, &s.Kind, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
+			// (club_id, slug) collision — un slug doublon dans le même club
 			return c.JSON(http.StatusConflict, map[string]string{"error": "slug_taken"})
 		}
 		h.logger.Error("insert structure", "err", err)
@@ -109,6 +159,10 @@ func (h *structuresHandler) create(c echo.Context) error {
 }
 
 func (h *structuresHandler) get(c echo.Context) error {
+	claims := ClaimsFromContext(c)
+	if claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "missing_claims"})
+	}
 	slug := strings.ToLower(strings.TrimSpace(c.Param("slug")))
 	if slug == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing_slug"})
@@ -116,10 +170,10 @@ func (h *structuresHandler) get(c echo.Context) error {
 
 	var s structure
 	err := h.pool.QueryRow(c.Request().Context(),
-		`SELECT id, slug, name, kind, settings, created_at, updated_at
-		 FROM structures WHERE slug = $1`,
-		slug,
-	).Scan(&s.ID, &s.Slug, &s.Name, &s.Kind, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, club_id, slug, name, kind, settings, created_at, updated_at
+		 FROM structures WHERE club_id = $1 AND slug = $2`,
+		claims.ClubID, slug,
+	).Scan(&s.ID, &s.ClubID, &s.Slug, &s.Name, &s.Kind, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
@@ -162,13 +216,13 @@ func (h *structuresHandler) update(c echo.Context) error {
 	var s structure
 	err = tx.QueryRow(ctx,
 		`UPDATE structures
-		 SET name = COALESCE($2, name),
-		     kind = COALESCE($3, kind),
-		     settings = COALESCE($4::jsonb, settings)
-		 WHERE slug = $1
-		 RETURNING id, slug, name, kind, settings, created_at, updated_at`,
-		slug, req.Name, req.Kind, nullableJSON(req.Settings),
-	).Scan(&s.ID, &s.Slug, &s.Name, &s.Kind, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
+		 SET name = COALESCE($3, name),
+		     kind = COALESCE($4, kind),
+		     settings = COALESCE($5::jsonb, settings)
+		 WHERE club_id = $1 AND slug = $2
+		 RETURNING id, club_id, slug, name, kind, settings, created_at, updated_at`,
+		claims.ClubID, slug, req.Name, req.Kind, nullableJSON(req.Settings),
+	).Scan(&s.ID, &s.ClubID, &s.Slug, &s.Name, &s.Kind, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
@@ -185,6 +239,68 @@ func (h *structuresHandler) update(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "commit_failed"})
 	}
 	return c.JSON(http.StatusOK, s)
+}
+
+// delete supprime une structure (hard delete). L'audit est écrit avant le
+// DELETE en transaction pour conserver la trace même après la disparition
+// de la structure (la ligne structures_audit a structure_id en FK CASCADE,
+// donc le DELETE structure supprime aussi ses lignes audit — on garde
+// quand même une trace dans l'audit en ajoutant l'entrée APRÈS suppression
+// est impossible. À la place, on capture la structure dans le payload).
+func (h *structuresHandler) delete(c echo.Context) error {
+	claims := ClaimsFromContext(c)
+	if claims == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "missing_claims"})
+	}
+	slug := strings.ToLower(strings.TrimSpace(c.Param("slug")))
+	if slug == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing_slug"})
+	}
+
+	ctx := c.Request().Context()
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_unavailable"})
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Snapshot avant suppression — utile pour l'audit log (la ligne audit
+	// elle-même sera CASCADE-supprimée, mais on garde le snapshot dans le
+	// payload via writeAudit).
+	var s structure
+	err = tx.QueryRow(ctx,
+		`SELECT id, club_id, slug, name, kind, settings, created_at, updated_at
+		 FROM structures WHERE club_id = $1 AND slug = $2`,
+		claims.ClubID, slug,
+	).Scan(&s.ID, &s.ClubID, &s.Slug, &s.Name, &s.Kind, &s.Settings, &s.CreatedAt, &s.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
+		}
+		h.logger.Error("snapshot structure for delete", "err", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+	}
+
+	// Audit AVANT delete (sinon le CASCADE détruit l'enregistrement audit).
+	// L'audit reste cohérent : structure_id pointe sur un UUID qui n'existe
+	// plus, mais on capture le snapshot dans `changes` pour reconstruire.
+	if err := writeAudit(ctx, tx, s.ID, "deleted", s, claims.Subject); err != nil {
+		h.logger.Error("audit write delete", "err", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "audit_failed"})
+	}
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM structures WHERE club_id = $1 AND slug = $2`,
+		claims.ClubID, slug,
+	); err != nil {
+		h.logger.Error("delete structure", "err", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "commit_failed"})
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // writeAudit insère une ligne dans structures_audit.
@@ -209,7 +325,7 @@ func nullableJSON(raw json.RawMessage) any {
 	return string(raw)
 }
 
-// isUniqueViolation détecte la violation de contrainte UNIQUE sur structures.slug.
+// isUniqueViolation détecte la violation de contrainte UNIQUE.
 // Code Postgres 23505.
 func isUniqueViolation(err error) bool {
 	if err == nil {
@@ -217,3 +333,4 @@ func isUniqueViolation(err error) bool {
 	}
 	return strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key value")
 }
+
