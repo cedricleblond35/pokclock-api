@@ -18,6 +18,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	apihttp "github.com/cedricleblond35/pokclock-api/internal/api"
+	"github.com/cedricleblond35/pokclock-api/internal/clients/workeradmin"
 	"github.com/cedricleblond35/pokclock-api/internal/db"
 	"github.com/cedricleblond35/pokclock-api/internal/domain/auth"
 )
@@ -60,6 +61,14 @@ func main() {
 
 	workerClient := auth.NewWorkerClient(cfg.WorkerVerifyURL, http.DefaultClient)
 
+	workerAdminClient := workeradmin.New(cfg.WorkerAdminURL, cfg.WorkerAdminToken, nil)
+	if !workerAdminClient.IsConfigured() {
+		logger.Warn("worker admin sync disabled — WORKER_ADMIN_URL or WORKER_ADMIN_TOKEN missing",
+			"url_set", cfg.WorkerAdminURL != "")
+	} else {
+		logger.Info("worker admin sync enabled", "url", cfg.WorkerAdminURL)
+	}
+
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -69,6 +78,7 @@ func main() {
 		Pool:                  pool,
 		Signer:                signer,
 		WorkerClient:          workerClient,
+		WorkerAdminClient:     workerAdminClient,
 		AllowedOrigins:        cfg.AllowedOrigins,
 		Logger:                logger,
 		SuperadminLicenseKeys: cfg.SuperadminLicenseKeys,

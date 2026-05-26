@@ -28,11 +28,17 @@ services:
       JWT_PRIVATE_KEY_PATH: "/run/secrets/jwt_private_pokclock"
       JWT_PUBLIC_KEY_PATH: "/run/secrets/jwt_public_pokclock"
       WORKER_VERIFY_URL: "https://pokclock-license.dynamidoxa.workers.dev/verify"
+      # Sync Postgres → D1 sur create/revoke license (Path A).
+      # Sans ces deux variables, la sync est désactivée et les licenses créées
+      # depuis ops.pokclock.com ne seront pas activables par l'app cliente.
+      WORKER_ADMIN_URL: "https://pokclock-license.dynamidoxa.workers.dev"
+      WORKER_ADMIN_TOKEN_FILE: "/run/secrets/worker_admin_token"
       ALLOWED_ORIGINS: "https://pokclock.com,https://www.pokclock.com"
     secrets:
       - pg_password_pokclock
       - jwt_private_pokclock
       - jwt_public_pokclock
+      - worker_admin_token
     networks:
       - nw-web
       - nw-pokclock
@@ -166,6 +172,8 @@ secrets:
   jwt_private_pokclock:
     external: true
   jwt_public_pokclock:
+    external: true
+  worker_admin_token:
     external: true
   restic_password:
     external: true

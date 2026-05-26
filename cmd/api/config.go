@@ -20,6 +20,14 @@ type Config struct {
 	WorkerVerifyURL   string
 	AllowedOrigins    []string
 	LogLevel          string
+	// WorkerAdminURL est l'URL de base du Worker (sans path) utilisée pour
+	// synchroniser les licenses créées en Postgres vers D1
+	// (ex: "https://pokclock-license.dynamidoxa.workers.dev"). Optionnel : si
+	// vide, la sync est désactivée et les licenses ops ne seront pas propagées.
+	WorkerAdminURL string
+	// WorkerAdminToken est le Bearer ADMIN_TOKEN du Worker. Lu en priorité
+	// depuis WORKER_ADMIN_TOKEN_FILE (Swarm secret), sinon depuis l'env directe.
+	WorkerAdminToken string
 	// SuperadminLicenseKeys est un mécanisme de bootstrap pour Phase 0.B :
 	// tant que le Worker /verify n'expose pas encore `role` dans sa réponse,
 	// on promeut explicitement certaines license keys en role=superadmin
@@ -36,7 +44,19 @@ func loadConfig() (Config, error) {
 		JWTPrivateKeyPath: os.Getenv("JWT_PRIVATE_KEY_PATH"),
 		JWTPublicKeyPath:  os.Getenv("JWT_PUBLIC_KEY_PATH"),
 		WorkerVerifyURL:   os.Getenv("WORKER_VERIFY_URL"),
+		WorkerAdminURL:    os.Getenv("WORKER_ADMIN_URL"),
 		LogLevel:          envOr("LOG_LEVEL", "info"),
+	}
+
+	// WORKER_ADMIN_TOKEN_FILE (Swarm secret) prioritaire, sinon env directe.
+	if path := strings.TrimSpace(os.Getenv("WORKER_ADMIN_TOKEN_FILE")); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return Config{}, fmt.Errorf("read worker admin token file %s: %w", path, err)
+		}
+		cfg.WorkerAdminToken = strings.TrimSpace(string(b))
+	} else {
+		cfg.WorkerAdminToken = strings.TrimSpace(os.Getenv("WORKER_ADMIN_TOKEN"))
 	}
 
 	origins := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))

@@ -10,17 +10,19 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/cedricleblond35/pokclock-api/internal/clients/workeradmin"
 	"github.com/cedricleblond35/pokclock-api/internal/domain/auth"
 )
 
 // Deps regroupe les dépendances injectées dans les handlers.
 type Deps struct {
-	BuildSHA       string
-	Pool           *pgxpool.Pool
-	Signer         *auth.Signer
-	WorkerClient   *auth.WorkerClient
-	AllowedOrigins []string
-	Logger         *slog.Logger
+	BuildSHA          string
+	Pool              *pgxpool.Pool
+	Signer            *auth.Signer
+	WorkerClient      *auth.WorkerClient
+	WorkerAdminClient *workeradmin.Client
+	AllowedOrigins    []string
+	Logger            *slog.Logger
 	// SuperadminLicenseKeys : bootstrap mechanism. Si la licence du caller est
 	// dans ce set, le handler /api/auth/issue émet le JWT avec role=superadmin
 	// même si le Worker /verify n'a pas (encore) propagé ce rôle. Vide en local
@@ -88,7 +90,11 @@ func Mount(e *echo.Echo, d Deps) {
 	adminGroup.POST("/clubs/:id/unsuspend", clubsH.unsuspend)
 	adminGroup.DELETE("/clubs/:id", clubsH.softDelete)
 
-	licensesH := &adminLicensesHandler{pool: d.Pool, logger: d.Logger}
+	licensesH := &adminLicensesHandler{
+		pool:        d.Pool,
+		logger:      d.Logger,
+		workerAdmin: d.WorkerAdminClient,
+	}
 	adminGroup.GET("/licenses", licensesH.list)
 	adminGroup.POST("/licenses", licensesH.create)
 	adminGroup.POST("/licenses/:id/revoke", licensesH.revoke)

@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,13 +17,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+
+	"github.com/cedricleblond35/pokclock-api/internal/clients/workeradmin"
 )
 
 // adminLicensesHandler porte les routes CRUD sur les licenses.
 // Protégé en amont par jwtAuth + requireRole(superadmin) dans router.go.
 type adminLicensesHandler struct {
-	pool   *pgxpool.Pool
-	logger *slog.Logger
+	pool        *pgxpool.Pool
+	logger      *slog.Logger
+	workerAdmin *workeradmin.Client
+}
+
+// planToTier traduit le plan business stocké en Postgres vers le tier
+// reconnu par le Worker. Map injectif (solo→Solo, etc.).
+var planToTier = map[string]string{
+	"solo": "Solo",
+	"club": "Club",
+	"pro":  "Pro",
 }
 
 type license struct {
@@ -50,10 +63,19 @@ type createLicenseRequest struct {
 // createLicenseResponse expose UNE SEULE FOIS les valeurs en clair des secrets
 // générés (license_key + worker_token). Le caller (UI admin) doit les copier
 // immédiatement, on ne pourra plus les régénérer.
+//
+// SyncStatus reflète l'état de la propagation vers le Worker D1 :
+//   - "ok"        : license insérée des deux côtés
+//   - "skipped"   : sync désactivée (WORKER_ADMIN_URL/TOKEN non configurés)
+//   - "failed"    : Postgres OK mais l'appel Worker a échoué (resync manuel
+//     nécessaire — voir SyncError pour le détail). La license business
+//     existe quand même côté ops, juste pas activable par l'app cliente.
 type createLicenseResponse struct {
 	License     license `json:"license"`
 	LicenseKey  string  `json:"licenseKey"`  // identique à license.licenseKey (commodité)
 	WorkerToken string  `json:"workerToken"` // affiché 1× puis perdu
+	SyncStatus  string  `json:"syncStatus"`
+	SyncError   string  `json:"syncError,omitempty"`
 }
 
 const (
@@ -134,6 +156,12 @@ func (h *adminLicensesHandler) list(c echo.Context) error {
 
 // create génère une nouvelle license + worker_token, stocke uniquement le hash
 // du token, et retourne UNE SEULE FOIS les valeurs en clair au caller.
+//
+// Sync Worker (Path A — cf. PHASE-0B-OPS-ROADMAP) : après insert Postgres,
+// l'handler appelle workeradmin.CreateLicense pour propager la license vers D1
+// avec l'email du club. Sans cette propagation l'app cliente ne pourrait pas
+// activer la license. Best-effort : un échec de sync ne rollback PAS Postgres,
+// on retourne SyncStatus=failed et le caller peut resync plus tard.
 func (h *adminLicensesHandler) create(c echo.Context) error {
 	var req createLicenseRequest
 	if err := c.Bind(&req); err != nil {
@@ -158,6 +186,29 @@ func (h *adminLicensesHandler) create(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_expires_at"})
 		}
 		expiresAt = &t
+	}
+
+	// Résolution préalable de l'email + plan du club : le Worker /admin/license
+	// les exige, donc on échoue tôt si le club n'a pas d'email plutôt que
+	// d'insérer en Postgres pour ensuite drift avec D1.
+	clubEmail, clubPlan, err := h.fetchClubEmailAndPlan(c.Request().Context(), req.ClubID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "club_not_found"})
+		}
+		h.logger.Error("fetch club email/plan", "err", err, "club_id", req.ClubID)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+	}
+	if clubEmail == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error":  "club_email_required",
+			"detail": "Définis un email sur ce club avant de générer une license (utilisé par l'activation app).",
+		})
+	}
+	tier, ok := planToTier[clubPlan]
+	if !ok {
+		h.logger.Error("unknown plan for license sync", "plan", clubPlan, "club_id", req.ClubID)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "unknown_plan"})
 	}
 
 	licenseKey, err := generateLicenseKey()
@@ -193,16 +244,89 @@ func (h *adminLicensesHandler) create(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
 	}
 
-	return c.JSON(http.StatusCreated, createLicenseResponse{
+	// Sync vers Worker (best-effort, ne bloque pas la réponse en cas d'échec).
+	syncStatus, syncErr := h.syncCreateToWorker(c.Request().Context(), workeradmin.CreateLicenseInput{
+		LicenseKey:    licenseKey,
+		Email:         clubEmail,
+		Tier:          tier,
+		Role:          req.Role,
+		ClubID:        req.ClubID,
+		ExpiresInDays: expiresInDays(expiresAt),
+	})
+
+	resp := createLicenseResponse{
 		License:     l,
 		LicenseKey:  licenseKey,
 		WorkerToken: workerToken,
-	})
+		SyncStatus:  syncStatus,
+	}
+	if syncErr != "" {
+		resp.SyncError = syncErr
+	}
+	return c.JSON(http.StatusCreated, resp)
+}
+
+// fetchClubEmailAndPlan lit l'email + plan d'un club pour préparer la sync
+// Worker. Renvoie email vide si la colonne est NULL côté DB.
+func (h *adminLicensesHandler) fetchClubEmailAndPlan(ctx context.Context, clubID string) (string, string, error) {
+	var email *string
+	var plan string
+	err := h.pool.QueryRow(ctx,
+		`SELECT email, plan FROM clubs WHERE id = $1`, clubID,
+	).Scan(&email, &plan)
+	if err != nil {
+		return "", "", err
+	}
+	if email == nil {
+		return "", plan, nil
+	}
+	return strings.TrimSpace(*email), plan, nil
+}
+
+// syncCreateToWorker propage la license vers D1. Best-effort : on retourne
+// le statut ("ok"|"skipped"|"failed") + une erreur formatée, jamais on ne
+// remonte d'erreur au caller HTTP.
+func (h *adminLicensesHandler) syncCreateToWorker(ctx context.Context, in workeradmin.CreateLicenseInput) (string, string) {
+	if h.workerAdmin == nil || !h.workerAdmin.IsConfigured() {
+		return "skipped", ""
+	}
+	if err := h.workerAdmin.CreateLicense(ctx, in); err != nil {
+		h.logger.Error("worker sync create license failed",
+			"err", err, "license_key", in.LicenseKey, "club_id", in.ClubID)
+		return "failed", err.Error()
+	}
+	h.logger.Info("worker sync create license ok",
+		"license_key", in.LicenseKey, "club_id", in.ClubID, "tier", in.Tier, "role", in.Role)
+	return "ok", ""
+}
+
+// expiresInDays convertit un timestamp absolu en nombre de jours restants
+// depuis maintenant. Retourne nil si t est nil (license perpétuelle).
+// Arrondit au jour supérieur pour éviter d'émettre une license déjà expirée
+// si t est dans quelques heures.
+func expiresInDays(t *time.Time) *int {
+	if t == nil {
+		return nil
+	}
+	diff := time.Until(*t).Hours() / 24
+	days := int(math.Ceil(diff))
+	if days < 1 {
+		days = 1
+	}
+	return &days
 }
 
 // revoke marque une license comme revoked. Idempotent : revoke un déjà-revoked
-// est OK. Le Worker Cloudflare DOIT être notifié séparément (Phase 0.B-2) pour
-// invalider côté D1.
+// est OK. Propage la révocation au Worker (best-effort).
+//
+// La réponse inclut syncStatus/syncError comme create — sans rompre la forme
+// existante du JSON (les champs sont optionnels côté UI).
+type revokeLicenseResponse struct {
+	license
+	SyncStatus string `json:"syncStatus,omitempty"`
+	SyncError  string `json:"syncError,omitempty"`
+}
+
 func (h *adminLicensesHandler) revoke(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -224,7 +348,28 @@ func (h *adminLicensesHandler) revoke(c echo.Context) error {
 		h.logger.Error("revoke license", "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
 	}
-	return c.JSON(http.StatusOK, l)
+
+	syncStatus, syncErr := h.syncRevokeToWorker(c.Request().Context(), l.LicenseKey)
+
+	return c.JSON(http.StatusOK, revokeLicenseResponse{
+		license:    l,
+		SyncStatus: syncStatus,
+		SyncError:  syncErr,
+	})
+}
+
+// syncRevokeToWorker propage une révocation vers D1. Best-effort, même
+// politique que syncCreateToWorker.
+func (h *adminLicensesHandler) syncRevokeToWorker(ctx context.Context, licenseKey string) (string, string) {
+	if h.workerAdmin == nil || !h.workerAdmin.IsConfigured() {
+		return "skipped", ""
+	}
+	if err := h.workerAdmin.RevokeLicense(ctx, licenseKey); err != nil {
+		h.logger.Error("worker sync revoke license failed", "err", err, "license_key", licenseKey)
+		return "failed", err.Error()
+	}
+	h.logger.Info("worker sync revoke license ok", "license_key", licenseKey)
+	return "ok", ""
 }
 
 // generateLicenseKey produit une clé du format POK-XXXX-XXXX-XXXX-XXXX
