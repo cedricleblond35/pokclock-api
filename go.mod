@@ -1,13 +1,13 @@
 module github.com/cedricleblond35/pokclock-api
 
-go 1.25.0
+go 1.24
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/jackc/pgx/v5 v5.7.1
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/pressly/goose/v3 v3.22.1
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.30.0
 )
 
 require (
