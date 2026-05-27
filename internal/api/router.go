@@ -149,6 +149,13 @@ func Mount(e *echo.Echo, d Deps) {
 	clubGroup.PUT("/point-scheme", clubPointSchemesH.upsert)
 	clubGroup.DELETE("/point-scheme", clubPointSchemesH.delete)
 
+	// Phase 0.G : saisons / championnats.
+	clubSeasonsH := &clubSeasonsHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/seasons", clubSeasonsH.list)
+	clubGroup.POST("/seasons", clubSeasonsH.create)
+	clubGroup.PATCH("/seasons/:id", clubSeasonsH.update)
+	clubGroup.DELETE("/seasons/:id", clubSeasonsH.delete)
+
 	// Phase 0.D-α : tournois publiés + modération des inscriptions en ligne.
 	clubTournamentsH := &clubTournamentsHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/tournaments", clubTournamentsH.list)
@@ -202,6 +209,11 @@ func Mount(e *echo.Echo, d Deps) {
 	publicResultsH := &publicResultsHandler{pool: d.Pool, logger: d.Logger}
 	publicGroup.GET("/clubs/:slug/tournaments/:id/results", publicResultsH.getResults)
 	publicGroup.GET("/clubs/:slug/leaderboard", publicResultsH.getLeaderboard)
+
+	// Phase 0.G : saisons et leaderboard scopé saison.
+	publicSeasonsH := &publicSeasonsHandler{pool: d.Pool, logger: d.Logger}
+	publicGroup.GET("/clubs/:slug/seasons", publicSeasonsH.list)
+	publicGroup.GET("/clubs/:slug/seasons/:season_slug", publicSeasonsH.getLeaderboard)
 
 	// /api/players/* : comptes joueurs (Phase 0.E.1).
 	playersAuthH := &playersAuthHandler{
