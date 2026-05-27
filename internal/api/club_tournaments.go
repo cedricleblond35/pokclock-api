@@ -44,6 +44,10 @@ type publishedTournament struct {
 	// Compteur d'inscriptions par status — populé via sous-requête dans list/get
 	PendingCount        int             `json:"pendingCount"`
 	ConfirmedCount      int             `json:"confirmedCount"`
+	// WasCreated : true si l'UPSERT a inséré, false si UPDATE. Dérivé de (xmax = 0)
+	// au moment du RETURNING. Sert au handler pour répondre 201 vs 200, pas exposé
+	// en JSON (le caller distingue via le status HTTP).
+	WasCreated          bool            `json:"-"`
 }
 
 type publishTournamentRequest struct {
@@ -160,6 +164,13 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_start_at"})
 	}
 
+	// UPSERT via INDEX UNIQUE (club_id, local_tournament_id) WHERE NOT NULL
+	// (cf. migration 011). Permet à l'app de re-cliquer "Publier en ligne"
+	// pour pousser ses modifs sans créer de doublon sur le site public.
+	//
+	// Sur conflit on garde status courant (pas de "ré-ouverture" auto d'un
+	// tournoi cancelled) et published_by_license/published_at restent
+	// initiaux pour l'audit ; seul updated_at bouge.
 	var t publishedTournament
 	err = h.pool.QueryRow(c.Request().Context(),
 		`INSERT INTO published_tournaments
@@ -167,12 +178,28 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		    starting_stack, max_players, format, late_reg_enabled, late_reg_until_level,
 		    local_tournament_id, blinds_summary, published_by_license)
 		 VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12, $13::jsonb, $14)
+		 ON CONFLICT (club_id, local_tournament_id)
+		   WHERE local_tournament_id IS NOT NULL
+		   DO UPDATE SET
+		     name = EXCLUDED.name,
+		     description = EXCLUDED.description,
+		     start_at = EXCLUDED.start_at,
+		     buy_in_amount = EXCLUDED.buy_in_amount,
+		     buy_in_fees = EXCLUDED.buy_in_fees,
+		     starting_stack = EXCLUDED.starting_stack,
+		     max_players = EXCLUDED.max_players,
+		     format = EXCLUDED.format,
+		     late_reg_enabled = EXCLUDED.late_reg_enabled,
+		     late_reg_until_level = EXCLUDED.late_reg_until_level,
+		     blinds_summary = EXCLUDED.blinds_summary,
+		     updated_at = now()
 		 RETURNING id, club_id, name, description, start_at,
 		           buy_in_amount::text, buy_in_fees::text,
 		           starting_stack, max_players, format,
 		           late_reg_enabled, late_reg_until_level,
 		           local_tournament_id, status, blinds_summary,
-		           published_by_license, published_at, updated_at`,
+		           published_by_license, published_at, updated_at,
+		           (xmax = 0) AS was_inserted`,
 		claims.ClubID, req.Name, req.Description, startAt,
 		req.BuyInAmount, req.BuyInFees,
 		req.StartingStack, req.MaxPlayers, req.Format,
@@ -184,12 +211,17 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		&t.StartingStack, &t.MaxPlayers, &t.Format,
 		&t.LateRegEnabled, &t.LateRegUntilLevel,
 		&t.LocalTournamentID, &t.Status, &t.BlindsSummary,
-		&t.PublishedByLicense, &t.PublishedAt, &t.UpdatedAt)
+		&t.PublishedByLicense, &t.PublishedAt, &t.UpdatedAt,
+		&t.WasCreated)
 	if err != nil {
-		h.logger.Error("insert published tournament", "err", err, "club_id", claims.ClubID)
+		h.logger.Error("upsert published tournament", "err", err, "club_id", claims.ClubID)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
 	}
-	return c.JSON(http.StatusCreated, t)
+	// 201 si insert, 200 si update — permet au caller WPF d'afficher le bon message.
+	if t.WasCreated {
+		return c.JSON(http.StatusCreated, t)
+	}
+	return c.JSON(http.StatusOK, t)
 }
 
 // setStatus transitionne le tournoi vers closed / cancelled. Pas de retour
