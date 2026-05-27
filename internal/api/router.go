@@ -199,11 +199,17 @@ func Mount(e *echo.Echo, d Deps) {
 	playersAuthGroup.GET("/magic-link/verify", playersAuthH.verifyMagicLink)
 	playersAuthGroup.POST("/logout", playersAuthH.logout)
 
-	playersMeH := &playersMeHandler{pool: d.Pool, logger: d.Logger}
+	playersMeH := &playersMeHandler{
+		pool:         d.Pool,
+		logger:       d.Logger,
+		emails:       emailCtx,
+		cookieDomain: d.PlayerCookieDomain,
+	}
 	playersMeGroup := e.Group("/api/players/me")
 	playersMeGroup.Use(playerAuthMiddleware(d.Signer))
 	playersMeGroup.GET("", playersMeH.getMe)
 	playersMeGroup.PATCH("", playersMeH.updateMe)
+	playersMeGroup.DELETE("", playersMeH.deleteMe)
 
 	// Phase 0.E.2 : inscription / cancel / liste via compte joueur.
 	playersRegH := &playersRegistrationsHandler{pool: d.Pool, logger: d.Logger, emails: emailCtx}

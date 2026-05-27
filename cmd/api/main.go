@@ -101,6 +101,9 @@ func main() {
 		logger.Info("bootstrap superadmin keys configured", "count", n)
 	}
 
+	// Phase 0.E hygiène : nettoyage périodique des magic links morts.
+	apihttp.StartMagicLinkCleanup(ctx, pool, logger)
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           e,

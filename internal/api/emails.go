@@ -94,6 +94,65 @@ type playerMagicLinkData struct {
 	Token string
 }
 
+// sendAccountDeleted : confirmation envoyée après suppression RGPD du compte.
+// Pas de lien actionnable (le compte n'existe plus), juste une trace.
+func (e *emailContext) sendAccountDeleted(ctx context.Context, in accountDeletedData) {
+	if e.client == nil || !e.client.IsConfigured() {
+		return
+	}
+	msg := resend.Message{
+		ToEmail: in.Email,
+		ToName:  in.FirstName,
+		Subject: "Ton compte PokClock a été supprimé",
+		HTML:    buildAccountDeletedHTML(in),
+		Text:    buildAccountDeletedText(in),
+	}
+	if err := e.client.Send(ctx, msg); err != nil {
+		e.logger.Warn("send account deleted email failed", "err", err, "email", in.Email)
+	}
+}
+
+type accountDeletedData struct {
+	Email     string
+	FirstName string
+}
+
+func buildAccountDeletedHTML(d accountDeletedData) string {
+	greeting := "Bonjour"
+	if strings.TrimSpace(d.FirstName) != "" {
+		greeting = "Bonjour " + html.EscapeString(d.FirstName)
+	}
+	return wrapEmailHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 16px;color:#FFD700;font-size:20px;">Compte supprimé</h2>
+<p>%s,</p>
+<p>Ton compte joueur PokClock a bien été supprimé à ta demande.</p>
+<p style="background:#1a1a1a;border-left:3px solid #FFD700;padding:12px;margin:16px 0;">
+  <strong>Données retirées :</strong> ton profil, ton historique d'inscriptions et tes résultats ont été anonymisés. Les leaderboards et palmarès historiques de tes clubs sont préservés mais sans ton nom.
+</p>
+<p style="font-size:13px;color:#aaa;">Si tu changes d'avis, tu peux créer un nouveau compte avec ce même email à tout moment via pokclock.com/fr/joueurs/login.</p>
+<p style="margin-top:24px;font-size:11px;color:#666;">Si tu n'es pas à l'origine de cette suppression, contacte support@pokclock.com immédiatement.</p>
+`, greeting))
+}
+
+func buildAccountDeletedText(d accountDeletedData) string {
+	greeting := "Bonjour,"
+	if strings.TrimSpace(d.FirstName) != "" {
+		greeting = "Bonjour " + d.FirstName + ","
+	}
+	return fmt.Sprintf(`%s
+
+Ton compte joueur PokClock a bien été supprimé à ta demande.
+
+Données retirées : ton profil, ton historique d'inscriptions et tes résultats ont été anonymisés. Les leaderboards et palmarès historiques de tes clubs sont préservés mais sans ton nom.
+
+Si tu changes d'avis, tu peux créer un nouveau compte avec ce même email à tout moment via pokclock.com/fr/joueurs/login.
+
+Si tu n'es pas à l'origine de cette suppression, contacte support@pokclock.com immédiatement.
+
+— PokClock
+`, greeting)
+}
+
 func buildPlayerMagicLinkHTML(d playerMagicLinkData, apiBaseURL string) string {
 	// Le lien pointe directement sur l'API : elle pose le cookie de session
 	// puis redirige vers le dashboard côté frontend. Évite un aller-retour
