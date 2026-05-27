@@ -9,7 +9,41 @@ import (
 	"github.com/cedricleblond35/pokclock-api/internal/domain/auth"
 )
 
-const ctxClaimsKey = "auth.claims"
+const (
+	ctxClaimsKey       = "auth.claims"
+	ctxPlayerClaimsKey = "auth.player_claims"
+)
+
+// playerAuthMiddleware vérifie un JWT RS256 dans le cookie pokclock_player.
+// Pour les routes /api/players/* qui ne sont pas dans le sous-groupe d'auth
+// (où le cookie n'est pas encore présent). À utiliser APRÈS le middleware
+// de récupération du cookie.
+func playerAuthMiddleware(signer *auth.Signer) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			cookie, err := c.Cookie(playerCookieName)
+			if err != nil || cookie == nil || cookie.Value == "" {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "not_authenticated"})
+			}
+			claims, err := signer.VerifyPlayer(cookie.Value)
+			if err != nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
+			}
+			c.Set(ctxPlayerClaimsKey, claims)
+			return next(c)
+		}
+	}
+}
+
+// PlayerClaimsFromContext récupère les claims joueur. Retourne nil si non
+// authentifié comme joueur.
+func PlayerClaimsFromContext(c echo.Context) *auth.PlayerClaims {
+	v, ok := c.Get(ctxPlayerClaimsKey).(*auth.PlayerClaims)
+	if !ok {
+		return nil
+	}
+	return v
+}
 
 // jwtAuthMiddleware vérifie un JWT RS256 dans le header Authorization: Bearer.
 // Les claims sont stockés dans le contexte Echo sous ctxClaimsKey.

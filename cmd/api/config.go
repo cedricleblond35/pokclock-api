@@ -34,6 +34,11 @@ type Config struct {
 	ResendAPIKey  string // RESEND_API_KEY_FILE (Swarm) ou RESEND_API_KEY direct
 	EmailFrom     string // ex: "PokClock <noreply@pokclock.com>", domaine vérifié dans Resend
 	PublicSiteURL string // ex: "https://pokclock.com" — pour construire les liens d'annulation
+	APIBaseURL    string // ex: "https://api.pokclock.com" — pour les liens dans les emails magic link
+	// PlayerCookieDomain (Phase 0.E.1) : domaine du cookie de session joueur.
+	// En prod ".pokclock.com" pour que le cookie soit envoyé sur api.pokclock.com
+	// depuis le frontend pokclock.com. Vide en dev (cookie limité à l'origine).
+	PlayerCookieDomain string
 	// SuperadminLicenseKeys est un mécanisme de bootstrap pour Phase 0.B :
 	// tant que le Worker /verify n'expose pas encore `role` dans sa réponse,
 	// on promeut explicitement certaines license keys en role=superadmin
@@ -77,6 +82,8 @@ func loadConfig() (Config, error) {
 	}
 	cfg.EmailFrom = envOr("EMAIL_FROM", "PokClock <noreply@pokclock.com>")
 	cfg.PublicSiteURL = strings.TrimRight(envOr("PUBLIC_SITE_URL", "https://pokclock.com"), "/")
+	cfg.APIBaseURL = strings.TrimRight(envOr("API_BASE_URL", "https://api.pokclock.com"), "/")
+	cfg.PlayerCookieDomain = strings.TrimSpace(os.Getenv("PLAYER_COOKIE_DOMAIN"))
 
 	origins := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
 	if origins != "" {

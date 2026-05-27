@@ -90,6 +90,8 @@ func main() {
 		WorkerAdminClient:     workerAdminClient,
 		ResendClient:          resendClient,
 		PublicSiteURL:         cfg.PublicSiteURL,
+		APIBaseURL:            cfg.APIBaseURL,
+		PlayerCookieDomain:    cfg.PlayerCookieDomain,
 		AllowedOrigins:        cfg.AllowedOrigins,
 		Logger:                logger,
 		SuperadminLicenseKeys: cfg.SuperadminLicenseKeys,

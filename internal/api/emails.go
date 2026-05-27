@@ -21,6 +21,7 @@ import (
 type emailContext struct {
 	client        *resend.Client
 	publicSiteURL string
+	apiBaseURL    string // ex "https://api.pokclock.com", utilisé pour les liens magiques joueur (0.E.1)
 	logger        *slog.Logger
 }
 
@@ -68,6 +69,61 @@ func (e *emailContext) sendModerationDecision(ctx context.Context, in moderation
 	if err := e.client.Send(ctx, msg); err != nil {
 		e.logger.Warn("send moderation email failed", "err", err, "email", in.Email, "confirmed", in.Confirmed)
 	}
+}
+
+// sendPlayerMagicLink : envoyé au joueur qui a demandé un magic link login.
+// Lien à 15 min de validité. Si Resend non configuré, no-op (le caller log).
+func (e *emailContext) sendPlayerMagicLink(ctx context.Context, in playerMagicLinkData) {
+	if e.client == nil || !e.client.IsConfigured() {
+		return
+	}
+	msg := resend.Message{
+		ToEmail: in.Email,
+		ToName:  in.Email,
+		Subject: "Ton lien de connexion PokClock",
+		HTML:    buildPlayerMagicLinkHTML(in, e.apiBaseURL),
+		Text:    buildPlayerMagicLinkText(in, e.apiBaseURL),
+	}
+	if err := e.client.Send(ctx, msg); err != nil {
+		e.logger.Warn("send player magic link failed", "err", err, "email", in.Email)
+	}
+}
+
+type playerMagicLinkData struct {
+	Email string
+	Token string
+}
+
+func buildPlayerMagicLinkHTML(d playerMagicLinkData, apiBaseURL string) string {
+	// Le lien pointe directement sur l'API : elle pose le cookie de session
+	// puis redirige vers le dashboard côté frontend. Évite un aller-retour
+	// RSC qui ne pourrait pas écrire le cookie d'auth sur .pokclock.com.
+	url := fmt.Sprintf("%s/api/players/auth/magic-link/verify?token=%s", apiBaseURL, d.Token)
+	return wrapEmailHTML(fmt.Sprintf(`
+<h2 style="margin:0 0 16px;color:#FFD700;font-size:20px;">Connexion à ton compte</h2>
+<p>Bonjour,</p>
+<p>Clique sur le bouton ci-dessous pour te connecter à ton compte joueur PokClock. Ce lien expire dans 15 minutes et ne peut être utilisé qu'une fois.</p>
+<p style="margin:24px 0;">
+  <a href="%s" style="display:inline-block;padding:12px 20px;background:#FFD700;color:#000;text-decoration:none;border-radius:4px;font-weight:bold;">Me connecter</a>
+</p>
+<p style="font-size:13px;color:#aaa;">Si le bouton ne marche pas, copie ce lien :<br><span style="word-break:break-all;color:#888;">%s</span></p>
+<p style="margin-top:24px;font-size:11px;color:#666;">Si tu n'as pas demandé cette connexion, tu peux ignorer ce message.</p>
+`, url, url))
+}
+
+func buildPlayerMagicLinkText(d playerMagicLinkData, apiBaseURL string) string {
+	url := fmt.Sprintf("%s/api/players/auth/magic-link/verify?token=%s", apiBaseURL, d.Token)
+	return fmt.Sprintf(`Bonjour,
+
+Clique sur ce lien pour te connecter à ton compte joueur PokClock :
+%s
+
+Ce lien expire dans 15 minutes et ne peut être utilisé qu'une fois.
+
+Si tu n'as pas demandé cette connexion, ignore ce message.
+
+— PokClock
+`, url)
 }
 
 type registerConfirmationData struct {

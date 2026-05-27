@@ -25,6 +25,13 @@ type Deps struct {
 	// Phase 0.D-α.1.b — emails transactionnels d'inscriptions online.
 	ResendClient  *resend.Client
 	PublicSiteURL string
+	// APIBaseURL : URL absolue de l'API elle-même (ex "https://api.pokclock.com").
+	// Utilisé pour construire les liens magic link dans les emails — l'API
+	// répond au clic et redirige ensuite vers PublicSiteURL.
+	APIBaseURL string
+	// Phase 0.E.1 — domaine du cookie de session joueur (ex ".pokclock.com").
+	// Vide en dev local pour cookie limité à l'origine.
+	PlayerCookieDomain string
 	AllowedOrigins    []string
 	Logger            *slog.Logger
 	// SuperadminLicenseKeys : bootstrap mechanism. Si la licence du caller est
@@ -42,10 +49,11 @@ func Mount(e *echo.Echo, d Deps) {
 
 	if len(d.AllowedOrigins) > 0 {
 		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-			AllowOrigins: d.AllowedOrigins,
-			AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete, http.MethodOptions},
-			AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAuthorization},
-			MaxAge:       300,
+			AllowOrigins:     d.AllowedOrigins,
+			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+			AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAuthorization},
+			AllowCredentials: true, // cookie pokclock_player envoyé cross-subdomain (0.E.1)
+			MaxAge:           300,
 		}))
 	}
 
@@ -139,6 +147,7 @@ func Mount(e *echo.Echo, d Deps) {
 	emailCtx := &emailContext{
 		client:        d.ResendClient,
 		publicSiteURL: d.PublicSiteURL,
+		apiBaseURL:    d.APIBaseURL,
 		logger:        d.Logger,
 	}
 
@@ -163,6 +172,29 @@ func Mount(e *echo.Echo, d Deps) {
 	publicGroup.GET("/clubs/:slug/tournaments/:id", publicTournamentsH.getByClubSlug)
 	publicGroup.POST("/clubs/:slug/tournaments/:id/register", publicTournamentsH.register)
 	publicGroup.GET("/registrations/:token/cancel", publicTournamentsH.cancelByToken)
+
+	// /api/players/* : comptes joueurs (Phase 0.E.1).
+	playersAuthH := &playersAuthHandler{
+		pool:          d.Pool,
+		signer:        d.Signer,
+		emails:        emailCtx,
+		logger:        d.Logger,
+		publicSiteURL: d.PublicSiteURL,
+		cookieDomain:  d.PlayerCookieDomain,
+	}
+	playersAuthGroup := e.Group("/api/players/auth")
+	// Rate-limit dur sur les endpoints magic link : 10 req/min par IP pour
+	// limiter le spam d'emails.
+	playersAuthGroup.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(10)))
+	playersAuthGroup.POST("/magic-link", playersAuthH.requestMagicLink)
+	playersAuthGroup.GET("/magic-link/verify", playersAuthH.verifyMagicLink)
+	playersAuthGroup.POST("/logout", playersAuthH.logout)
+
+	playersMeH := &playersMeHandler{pool: d.Pool, logger: d.Logger}
+	playersMeGroup := e.Group("/api/players/me")
+	playersMeGroup.Use(playerAuthMiddleware(d.Signer))
+	playersMeGroup.GET("", playersMeH.getMe)
+	playersMeGroup.PATCH("", playersMeH.updateMe)
 
 	// /api/admin/* : routes super-admin (cross-clubs), réservées à Cédric.
 	// Double protection : JWT valide + claim role=superadmin.
