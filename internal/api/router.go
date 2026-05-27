@@ -123,6 +123,12 @@ func Mount(e *echo.Echo, d Deps) {
 	clubAuditH := &clubAuditHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/audit", clubAuditH.search)
 
+	// Phase 0.D-γ.1 : barème de points par club.
+	clubPointSchemesH := &clubPointSchemesHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/point-scheme", clubPointSchemesH.get)
+	clubGroup.PUT("/point-scheme", clubPointSchemesH.upsert)
+	clubGroup.DELETE("/point-scheme", clubPointSchemesH.delete)
+
 	// Phase 0.D-α : tournois publiés + modération des inscriptions en ligne.
 	clubTournamentsH := &clubTournamentsHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/tournaments", clubTournamentsH.list)

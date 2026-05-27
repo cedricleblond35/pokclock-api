@@ -135,6 +135,16 @@ type publicTournamentDetail struct {
 	// PrizeStructure : payouts snapshot poussé par l'app au publish (peut être null
 	// si pas encore configuré côté admin). Schéma cf. migration 013.
 	PrizeStructure json.RawMessage `json:"prizeStructure,omitempty"`
+	// PointScheme : barème de points du club (Phase 0.D-γ.1). Null si le club
+	// n'a pas configuré de barème. Schéma cf. migration 014.
+	PointScheme *publicPointScheme `json:"pointScheme,omitempty"`
+}
+
+// publicPointScheme : version publique du barème (sans timestamps internes).
+type publicPointScheme struct {
+	Name   string          `json:"name"`
+	Type   string          `json:"type"`
+	Params json.RawMessage `json:"params"`
 }
 
 // localPlayerRecord : élément du JSON local_players stocké côté backend.
@@ -176,6 +186,9 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 		displayMode        string
 		localPlayersJSON   []byte
 		prizeStructureJSON []byte
+		pointSchemeName    *string
+		pointSchemeType    *string
+		pointSchemeParams  []byte
 	)
 	err = h.pool.QueryRow(c.Request().Context(),
 		`SELECT t.id, t.club_id, t.name, t.description, t.start_at,
@@ -184,8 +197,10 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 		        t.late_reg_enabled, t.late_reg_until_level, t.status,
 		        COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0),
 		        COALESCE(jsonb_array_length(t.local_players), 0),
-		        t.show_players, t.players_display_mode, t.local_players, t.prize_structure
+		        t.show_players, t.players_display_mode, t.local_players, t.prize_structure,
+		        ps.name, ps.type, ps.params
 		 FROM published_tournaments t
+		 LEFT JOIN point_schemes ps ON ps.club_id = t.club_id
 		 WHERE t.id = $1 AND t.club_id = $2
 		   AND t.status IN ('open', 'closed')`,
 		id, clubID,
@@ -194,7 +209,8 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 		&t.StartingStack, &t.MaxPlayers, &t.Format,
 		&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status,
 		&t.ConfirmedCount, &t.LocalPlayersCount,
-		&showPlayers, &displayMode, &localPlayersJSON, &prizeStructureJSON)
+		&showPlayers, &displayMode, &localPlayersJSON, &prizeStructureJSON,
+		&pointSchemeName, &pointSchemeType, &pointSchemeParams)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "tournament_not_found"})
@@ -215,6 +231,13 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 	detail := publicTournamentDetail{publicTournament: t, Players: []string{}}
 	if len(prizeStructureJSON) > 0 {
 		detail.PrizeStructure = json.RawMessage(prizeStructureJSON)
+	}
+	if pointSchemeName != nil && pointSchemeType != nil {
+		detail.PointScheme = &publicPointScheme{
+			Name:   *pointSchemeName,
+			Type:   *pointSchemeType,
+			Params: json.RawMessage(pointSchemeParams),
+		}
 	}
 	if !showPlayers || displayMode == "hidden" {
 		return c.JSON(http.StatusOK, detail)
