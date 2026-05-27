@@ -49,8 +49,14 @@ type publicTournament struct {
 	LateRegEnabled    bool      `json:"lateRegEnabled"`
 	LateRegUntilLevel *int      `json:"lateRegUntilLevel,omitempty"`
 	Status            string    `json:"status"`
-	ConfirmedCount    int       `json:"confirmedCount"`
-	SpotsLeft         *int      `json:"spotsLeft,omitempty"` // null si MaxPlayers = 0 (illimité)
+	/// <summary>Inscriptions online confirmées (modérées par admin).</summary>
+	ConfirmedCount int `json:"confirmedCount"`
+	/// <summary>Joueurs locaux poussés depuis l'app (TournamentPlayer snapshots).</summary>
+	LocalPlayersCount int `json:"localPlayersCount"`
+	/// <summary>Total = confirmedCount + localPlayersCount. Utilisé pour Places X/max.</summary>
+	TotalPlayerCount int `json:"totalPlayerCount"`
+	/// <summary>null si MaxPlayers = 0 (illimité). Calculé sur totalPlayerCount.</summary>
+	SpotsLeft *int `json:"spotsLeft,omitempty"`
 }
 
 // listByClubSlug : GET /public/clubs/:slug/tournaments
@@ -76,7 +82,8 @@ func (h *publicTournamentsHandler) listByClubSlug(c echo.Context) error {
 		        t.buy_in_amount::text, t.buy_in_fees::text,
 		        t.starting_stack, t.max_players, t.format,
 		        t.late_reg_enabled, t.late_reg_until_level, t.status,
-		        COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0)
+		        COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0),
+		        COALESCE(jsonb_array_length(t.local_players), 0)
 		 FROM published_tournaments t
 		 WHERE t.club_id = $1
 		   AND t.status IN ('open', 'closed')
@@ -95,13 +102,15 @@ func (h *publicTournamentsHandler) listByClubSlug(c echo.Context) error {
 		if err := rows.Scan(&t.ID, &t.ClubID, &t.Name, &t.Description, &t.StartAt,
 			&t.BuyInAmount, &t.BuyInFees,
 			&t.StartingStack, &t.MaxPlayers, &t.Format,
-			&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status, &t.ConfirmedCount); err != nil {
+			&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status,
+			&t.ConfirmedCount, &t.LocalPlayersCount); err != nil {
 			h.logger.Error("scan public tournament", "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_scan"})
 		}
 		t.ClubName = clubName
+		t.TotalPlayerCount = t.ConfirmedCount + t.LocalPlayersCount
 		if t.MaxPlayers > 0 {
-			spots := t.MaxPlayers - t.ConfirmedCount
+			spots := t.MaxPlayers - t.TotalPlayerCount
 			if spots < 0 {
 				spots = 0
 			}
@@ -169,6 +178,7 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 		        t.starting_stack, t.max_players, t.format,
 		        t.late_reg_enabled, t.late_reg_until_level, t.status,
 		        COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0),
+		        COALESCE(jsonb_array_length(t.local_players), 0),
 		        t.show_players, t.players_display_mode, t.local_players
 		 FROM published_tournaments t
 		 WHERE t.id = $1 AND t.club_id = $2
@@ -177,7 +187,8 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 	).Scan(&t.ID, &t.ClubID, &t.Name, &t.Description, &t.StartAt,
 		&t.BuyInAmount, &t.BuyInFees,
 		&t.StartingStack, &t.MaxPlayers, &t.Format,
-		&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status, &t.ConfirmedCount,
+		&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status,
+		&t.ConfirmedCount, &t.LocalPlayersCount,
 		&showPlayers, &displayMode, &localPlayersJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -187,8 +198,9 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
 	}
 	t.ClubName = clubName
+	t.TotalPlayerCount = t.ConfirmedCount + t.LocalPlayersCount
 	if t.MaxPlayers > 0 {
-		spots := t.MaxPlayers - t.ConfirmedCount
+		spots := t.MaxPlayers - t.TotalPlayerCount
 		if spots < 0 {
 			spots = 0
 		}
@@ -337,7 +349,10 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "club_not_found"})
 	}
 
-	// État + capacité du tournoi (+ name + buy_in pour l'email)
+	// État + capacité du tournoi (+ name + buy_in pour l'email).
+	// activeCount inclut online (pending+confirmed) ET local_players pour
+	// que la limite max_players ne soit pas contournable via inscription
+	// online quand l'admin a déjà rempli avec ses joueurs locaux.
 	var (
 		status         string
 		startAt        time.Time
@@ -350,7 +365,8 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 		`SELECT t.status, t.start_at, t.max_players,
 		        (SELECT COUNT(*) FROM tournament_registrations r
 		         WHERE r.published_tournament_id = t.id
-		           AND r.status IN ('pending', 'confirmed')),
+		           AND r.status IN ('pending', 'confirmed'))
+		        + COALESCE(jsonb_array_length(t.local_players), 0),
 		        t.name, t.buy_in_amount::text
 		 FROM published_tournaments t
 		 WHERE t.id = $1 AND t.club_id = $2`,
