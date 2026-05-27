@@ -147,7 +147,7 @@ func (h *playersMeHandler) deleteMe(c echo.Context) error {
 		h.logger.Error("begin delete tx", "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_tx"})
 	}
-	defer tx.Rollback(c.Request().Context())
+	defer tx.Rollback(c.Request().Context()) //nolint:errcheck
 
 	if _, err := tx.Exec(c.Request().Context(),
 		`UPDATE tournament_registrations

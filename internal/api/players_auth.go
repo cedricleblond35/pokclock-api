@@ -110,7 +110,7 @@ func (h *playersAuthHandler) verifyMagicLink(c echo.Context) error {
 		h.logger.Error("begin tx", "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_tx"})
 	}
-	defer tx.Rollback(c.Request().Context())
+	defer tx.Rollback(c.Request().Context()) //nolint:errcheck
 
 	var email string
 	var expiresAt time.Time

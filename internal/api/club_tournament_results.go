@@ -96,7 +96,7 @@ func (h *clubTournamentResultsHandler) publishResults(c echo.Context) error {
 		h.logger.Error("begin tx", "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_tx"})
 	}
-	defer tx.Rollback(c.Request().Context())
+	defer tx.Rollback(c.Request().Context()) //nolint:errcheck
 
 	if _, err := tx.Exec(c.Request().Context(),
 		`DELETE FROM tournament_results WHERE published_tournament_id = $1`, tid); err != nil {
