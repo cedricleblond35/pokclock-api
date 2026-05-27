@@ -179,7 +179,7 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		    local_tournament_id, blinds_summary, published_by_license)
 		 VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12, $13::jsonb, $14)
 		 ON CONFLICT (club_id, local_tournament_id)
-		   WHERE local_tournament_id IS NOT NULL
+		   WHERE local_tournament_id IS NOT NULL AND status <> 'cancelled'
 		   DO UPDATE SET
 		     name = EXCLUDED.name,
 		     description = EXCLUDED.description,
