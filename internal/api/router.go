@@ -196,6 +196,12 @@ func Mount(e *echo.Echo, d Deps) {
 	playersMeGroup.GET("", playersMeH.getMe)
 	playersMeGroup.PATCH("", playersMeH.updateMe)
 
+	// Phase 0.E.2 : inscription / cancel / liste via compte joueur.
+	playersRegH := &playersRegistrationsHandler{pool: d.Pool, logger: d.Logger, emails: emailCtx}
+	playersMeGroup.POST("/clubs/:slug/tournaments/:id/register", playersRegH.register)
+	playersMeGroup.DELETE("/registrations/:id", playersRegH.cancelMyRegistration)
+	playersMeGroup.GET("/registrations", playersRegH.listMyRegistrations)
+
 	// /api/admin/* : routes super-admin (cross-clubs), réservées à Cédric.
 	// Double protection : JWT valide + claim role=superadmin.
 	adminGroup := e.Group("/api/admin")
