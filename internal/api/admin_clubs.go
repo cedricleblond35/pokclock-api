@@ -292,6 +292,75 @@ func (h *adminClubsHandler) softDelete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// listMembers : GET /api/admin/clubs/:id/members.
+// Version super-admin de l'endpoint /api/club/members (cross-clubs).
+// Permet à Cédric de voir les membres de n'importe quel club depuis le
+// dashboard ops, sans avoir une license dans chaque club.
+func (h *adminClubsHandler) listMembers(c echo.Context) error {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing_id"})
+	}
+
+	// Sanity check : le club doit exister (sinon on confond 404 club et liste vide)
+	var exists bool
+	err := h.pool.QueryRow(c.Request().Context(),
+		`SELECT EXISTS(SELECT 1 FROM clubs WHERE id = $1)`, id,
+	).Scan(&exists)
+	if err != nil {
+		h.logger.Error("check club exists", "err", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+	}
+	if !exists {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "club_not_found"})
+	}
+
+	limit := parsePositiveInt(c.QueryParam("limit"), 200, 1000)
+	offset := parsePositiveInt(c.QueryParam("offset"), 0, 1_000_000)
+
+	rows, err := h.pool.Query(c.Request().Context(),
+		`SELECT id, club_id, first_name, last_name, email, notes, status,
+		        created_at, updated_at
+		 FROM members
+		 WHERE club_id = $1
+		 ORDER BY last_name, first_name
+		 LIMIT $2 OFFSET $3`,
+		id, limit, offset,
+	)
+	if err != nil {
+		h.logger.Error("admin list members", "err", err, "club_id", id)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+	}
+	defer rows.Close()
+
+	type adminMember struct {
+		ID        string    `json:"id"`
+		ClubID    string    `json:"clubId"`
+		FirstName string    `json:"firstName"`
+		LastName  string    `json:"lastName"`
+		Email     *string   `json:"email,omitempty"`
+		Notes     *string   `json:"notes,omitempty"`
+		Status    string    `json:"status"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+	out := make([]adminMember, 0, limit)
+	for rows.Next() {
+		var m adminMember
+		if err := rows.Scan(&m.ID, &m.ClubID, &m.FirstName, &m.LastName, &m.Email, &m.Notes,
+			&m.Status, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			h.logger.Error("scan admin member", "err", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_scan"})
+		}
+		out = append(out, m)
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"members": out,
+		"limit":   limit,
+		"offset":  offset,
+	})
+}
+
 // parsePositiveInt parse un query param en int positif borné par max.
 // Retourne fallback si vide ou invalide.
 func parsePositiveInt(v string, fallback, max int) int {

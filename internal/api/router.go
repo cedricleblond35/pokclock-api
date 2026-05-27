@@ -171,6 +171,8 @@ func Mount(e *echo.Echo, d Deps) {
 	adminGroup.POST("/clubs/:id/suspend", clubsH.suspend)
 	adminGroup.POST("/clubs/:id/unsuspend", clubsH.unsuspend)
 	adminGroup.DELETE("/clubs/:id", clubsH.softDelete)
+	// Phase 0.C-γ partie 3e : visibilité super-admin des membres d'un club.
+	adminGroup.GET("/clubs/:id/members", clubsH.listMembers)
 
 	licensesH := &adminLicensesHandler{
 		pool:        d.Pool,
