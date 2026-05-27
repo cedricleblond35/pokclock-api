@@ -2,7 +2,7 @@
 
 > Référence technique exhaustive : toutes les tables Postgres du backend `pokclock-api`, leur structure, les relations entre elles, et la liste des consommateurs (handlers HTTP + apps clientes).
 
-À jour au **2026-05-27**, après migration 019.
+À jour au **2026-05-27**, après migration 023.
 
 Postgres 16-alpine, service Swarm `pokclock-api_postgres` sur VPS OVH `vps-eb94174b`. Toutes les tables vivent dans une seule base `pokclock`. Migrations gérées par `goose` au boot de l'API.
 
@@ -76,6 +76,8 @@ Postgres 16-alpine, service Swarm `pokclock-api_postgres` sur VPS OVH `vps-eb941
 | [`point_schemes`](#point_schemes) | Barème de points du club (1-to-1) | = nombre de clubs |
 | [`players`](#players) | Compte joueur (magic link auth) | ~100-10000 |
 | [`player_magic_links`](#player_magic_links) | Tokens login passwordless temporaires | auto-purgé /6h |
+| [`player_club_memberships`](#player_club_memberships) | Adhésion joueur ↔ club (Phase 0.F) | ~1000-50000 |
+| [`player_google_tokens`](#player_google_tokens) | Tokens OAuth Calendar par joueur (Phase 0.E.5) | sous-ensemble des players |
 
 ---
 
@@ -280,6 +282,7 @@ Handler : [`internal/api/structures.go`](../internal/api/structures.go) (writes)
 | `players_display_mode` | text NOT NULL DEFAULT `hidden` | `hidden` / `pseudo` / `first_initial_last` / `full_name`. Ajouté en 012 |
 | `local_players` | jsonb NOT NULL DEFAULT `[]` | Snapshot des joueurs locaux poussés par WPF. Ajouté en 012 |
 | `prize_structure` | jsonb NULL | Payouts calculés côté WPF. Ajouté en 013 |
+| `audience` | text NOT NULL DEFAULT `public` CHECK | `public` ou `members_only`. Ajouté en 021 (Phase 0.F) |
 | `published_by_license` | text NOT NULL | License_key du publisher |
 | `published_at`, `updated_at` | timestamptz | |
 
@@ -325,6 +328,7 @@ Handler : [`internal/api/club_tournaments.go`](../internal/api/club_tournaments.
 | `moderation_reason` | text NULL | Motif optionnel sur reject |
 | `cancel_token` | text NOT NULL UNIQUE | 32 bytes base64url, magic link annulation email |
 | `player_id` | uuid NULL FK → players.id ON DELETE SET NULL | Ajouté en 017. Set si inscription via compte |
+| `google_event_id` | text NULL | ID de l'event Google Calendar associé (Phase 0.E.5). Set via calendarSync. NULL si joueur n'a pas Calendar connecté ou si l'API a échoué. Ajouté en 023 |
 | `registered_at`, `updated_at` | timestamptz | |
 
 Index :
@@ -477,6 +481,79 @@ Migration : 016. Cleanup one-shot : 019.
 | Background goroutine | `StartMagicLinkCleanup` (DELETE expired/used /6h) | | x |
 
 Handler : [`internal/api/players_auth.go`](../internal/api/players_auth.go), [`internal/api/players_me.go`](../internal/api/players_me.go), [`internal/api/cleanup.go`](../internal/api/cleanup.go).
+
+---
+
+## player_club_memberships
+
+> Adhésion d'un compte joueur à un club (Phase 0.F). Permet de gérer les tournois `members_only` : seuls les joueurs avec une membership `active` sur le club peuvent s'inscrire.
+
+Distinct de `members` (qui représente le staff du club : croupiers, dealers, admins).
+
+| Colonne | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `player_id` | uuid NOT NULL FK → players.id ON DELETE CASCADE | |
+| `club_id` | uuid NOT NULL FK → clubs.id ON DELETE CASCADE | |
+| `status` | text NOT NULL CHECK | `pending` / `active` / `rejected` / `revoked`, default `pending` |
+| `requested_at` | timestamptz NOT NULL | |
+| `moderated_by_license` | text NULL | License_key de l'admin qui a validé/refusé |
+| `moderated_at` | timestamptz NULL | |
+| `moderation_reason` | text NULL | Motif optionnel sur reject/revoke |
+| `updated_at` | timestamptz NOT NULL | Trigger |
+
+Contraintes : UNIQUE `(player_id, club_id)`.
+
+Index : `player_club_memberships_player_idx`, `player_club_memberships_club_status_idx`.
+
+Migration : 020.
+
+### Qui tape sur `player_club_memberships`
+
+| Acteur | Endpoint / opération | Lecture | Écriture |
+|---|---|---|---|
+| Joueur authentifié | `POST /api/players/me/clubs/:slug/join` (INSERT pending, ou re-pending si rejected/revoked existant) | x | x |
+| Joueur authentifié | `GET /api/players/me/clubs` (list ses memberships) | x | |
+| Joueur authentifié | `DELETE /api/players/me/clubs/:slug` (hard delete) | | x |
+| Club admin | `GET /api/club/memberships?status=...` (JOIN players pour nom/email) | x | |
+| Club admin | `POST /api/club/memberships/:id/approve` (pending → active) | x | x |
+| Club admin | `POST /api/club/memberships/:id/reject` (pending → rejected) | x | x |
+| Club admin | `POST /api/club/memberships/:id/revoke` (active → revoked) | x | x |
+| Joueur authentifié | `POST /api/players/me/clubs/:slug/tournaments/:id/register` (EXISTS check sur status='active') | x | |
+
+Handler : [`internal/api/players_memberships.go`](../internal/api/players_memberships.go), [`internal/api/club_memberships.go`](../internal/api/club_memberships.go), [`internal/api/players_registrations.go`](../internal/api/players_registrations.go).
+
+---
+
+## player_google_tokens
+
+> Tokens OAuth Google Calendar par joueur (Phase 0.E.5). 1-to-1 via PK player_id. Permet d'auto-créer les events tournoi dans l'agenda Google du joueur.
+
+Stockés en clair (réseau privé Swarm, attaquant DB a déjà tout). pgcrypto possible plus tard si défense en profondeur.
+
+| Colonne | Type | Notes |
+|---|---|---|
+| `player_id` | uuid PK FK → players.id ON DELETE CASCADE | |
+| `access_token` | text NOT NULL | Court (~1h Google), refresh auto via service |
+| `refresh_token` | text NOT NULL | Long terme, utilisé pour rafraîchir l'access_token |
+| `token_type` | text NOT NULL DEFAULT `Bearer` | |
+| `expires_at` | timestamptz NOT NULL | Auto-refresh quand < 1 min de marge |
+| `scope` | text NOT NULL | Scopes accordés (en pratique `calendar.events`) |
+| `connected_at` | timestamptz NOT NULL | Date du premier consent |
+| `updated_at` | timestamptz NOT NULL | Trigger |
+
+Migration : 022.
+
+### Qui tape sur `player_google_tokens`
+
+| Acteur | Endpoint / opération | Lecture | Écriture |
+|---|---|---|---|
+| Joueur authentifié | `GET /api/players/me/google-calendar/start` → callback (UPSERT) | | x |
+| Joueur authentifié | `GET /api/players/me/google-calendar` (status SELECT) | x | |
+| Joueur authentifié | `DELETE /api/players/me/google-calendar` (revoke + DELETE) | | x |
+| Background calendarSync | À chaque sync : SELECT pour récupérer access_token. UPDATE après refresh si nouveau access_token. | x | x |
+
+Handler : [`internal/api/players_calendar.go`](../internal/api/players_calendar.go), [`internal/api/calendar_sync.go`](../internal/api/calendar_sync.go).
 
 ---
 

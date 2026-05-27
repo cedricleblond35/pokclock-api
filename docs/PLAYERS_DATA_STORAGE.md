@@ -66,6 +66,49 @@ FK ajouté en Phase 0.E.4 pour lier un classement final à un compte. Nullable, 
 
 Migration : [`018_tournament_results.sql`](../internal/db/migrations/018_tournament_results.sql).
 
+### 2.5 `player_club_memberships` (Phase 0.F)
+
+Adhésion d'un joueur à un club, prérequis pour s'inscrire à un tournoi `members_only`.
+
+| Colonne | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `player_id` | uuid FK CASCADE | |
+| `club_id` | uuid FK CASCADE | |
+| `status` | text | `pending` / `active` / `rejected` / `revoked` |
+| `requested_at` | timestamptz | |
+| `moderated_by_license`, `moderated_at`, `moderation_reason` | nullable | |
+
+Cascade : si le joueur supprime son compte, ses memberships disparaissent (CASCADE) — pas d'anonymisation nécessaire, c'est juste une relation.
+
+Migration : [`020_player_club_memberships.sql`](../internal/db/migrations/020_player_club_memberships.sql).
+
+### 2.6 `player_google_tokens` (Phase 0.E.5)
+
+Tokens OAuth pour synchroniser les inscriptions tournoi dans l'agenda Google du joueur.
+
+| Colonne | Type | Notes |
+|---|---|---|
+| `player_id` | uuid PK FK CASCADE | 1-to-1 avec player |
+| `access_token` | text | Court terme (~1h), stocké en clair |
+| `refresh_token` | text | Long terme, stocké en clair |
+| `token_type` | text DEFAULT 'Bearer' | |
+| `expires_at` | timestamptz | Auto-refresh quand expiré |
+| `scope` | text | `calendar.events` |
+| `connected_at`, `updated_at` | timestamptz | |
+
+**Stockage en clair** : la DB Postgres est sur réseau privé Swarm, l'attaquant qui y accède a déjà accès à tout le reste. Si on veut une couche supplémentaire plus tard (défense en profondeur), pgcrypto + secret KMS.
+
+**Suppression compte** : CASCADE supprime la row, **mais** le token reste valide côté Google jusqu'à expiration (refresh) ou révocation explicite. Pour révoquer côté Google aussi : voir endpoint `DELETE /api/players/me/google-calendar` qui révoque avant de supprimer la row.
+
+Migration : [`022_player_google_tokens.sql`](../internal/db/migrations/022_player_google_tokens.sql).
+
+### 2.7 `tournament_registrations.google_event_id` (Phase 0.E.5)
+
+Colonne nullable ajoutée pour lier une inscription à l'event Google Calendar correspondant. Permet update (au confirm) et delete (au cancel/reject).
+
+Migration : [`023_tournament_registrations_google_event_id.sql`](../internal/db/migrations/023_tournament_registrations_google_event_id.sql).
+
 ---
 
 ## 3. Session côté navigateur (cookie JWT)
@@ -178,6 +221,9 @@ COMMIT;
 - **Compte** : supprimé définitivement
 - **Inscriptions passées et futures** : anonymisées. Les positions dans les classements historiques restent (sans nom identifiable), les compteurs de joueurs sur les tournois passés restent corrects.
 - **Résultats** : anonymisés idem. Le leaderboard club préserve la structure (rangs, points) sans le nom.
+- **Memberships clubs** : CASCADE delete via FK (table `player_club_memberships`)
+- **Tokens Google Calendar** : CASCADE delete via FK (table `player_google_tokens`). **Limitation** : les tokens restent valides côté Google jusqu'à leur expiration naturelle ou révocation explicite (le DELETE me ne les révoque pas via l'API Google pour rester rapide en transaction). Pour révoquer côté Google, l'utilisateur peut le faire via [security.google.com](https://myaccount.google.com/permissions).
+- **Events Google Calendar existants** : pas supprimés (le compte est déjà détruit, on ne peut plus appeler l'API Calendar avec son token). Les events tournoi resteront dans son agenda. L'utilisateur peut les supprimer manuellement.
 - **Cookie de session** : cleared via `Set-Cookie` avec `Max-Age=-1` dans la réponse
 - **JWT existant** : cryptographiquement valide mais inutilisable (player_id introuvable en DB)
 - **Email de confirmation** : envoyé best-effort via Resend pour traçabilité
