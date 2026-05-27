@@ -49,6 +49,8 @@ type publicTournament struct {
 	LateRegEnabled    bool      `json:"lateRegEnabled"`
 	LateRegUntilLevel *int      `json:"lateRegUntilLevel,omitempty"`
 	Status            string    `json:"status"`
+	/// <summary>Phase 0.F : 'public' ou 'members_only'.</summary>
+	Audience string `json:"audience"`
 	/// <summary>Inscriptions online confirmées (modérées par admin).</summary>
 	ConfirmedCount int `json:"confirmedCount"`
 	/// <summary>Joueurs locaux poussés depuis l'app (TournamentPlayer snapshots).</summary>
@@ -82,6 +84,7 @@ func (h *publicTournamentsHandler) listByClubSlug(c echo.Context) error {
 		        t.buy_in_amount::text, t.buy_in_fees::text,
 		        t.starting_stack, t.max_players, t.format,
 		        t.late_reg_enabled, t.late_reg_until_level, t.status,
+		        t.audience,
 		        COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0),
 		        COALESCE(jsonb_array_length(t.local_players), 0)
 		 FROM published_tournaments t
@@ -103,6 +106,7 @@ func (h *publicTournamentsHandler) listByClubSlug(c echo.Context) error {
 			&t.BuyInAmount, &t.BuyInFees,
 			&t.StartingStack, &t.MaxPlayers, &t.Format,
 			&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status,
+			&t.Audience,
 			&t.ConfirmedCount, &t.LocalPlayersCount); err != nil {
 			h.logger.Error("scan public tournament", "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_scan"})
@@ -195,6 +199,7 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 		        t.buy_in_amount::text, t.buy_in_fees::text,
 		        t.starting_stack, t.max_players, t.format,
 		        t.late_reg_enabled, t.late_reg_until_level, t.status,
+		        t.audience,
 		        COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0),
 		        COALESCE(jsonb_array_length(t.local_players), 0),
 		        t.show_players, t.players_display_mode, t.local_players, t.prize_structure,
@@ -208,6 +213,7 @@ func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
 		&t.BuyInAmount, &t.BuyInFees,
 		&t.StartingStack, &t.MaxPlayers, &t.Format,
 		&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status,
+		&t.Audience,
 		&t.ConfirmedCount, &t.LocalPlayersCount,
 		&showPlayers, &displayMode, &localPlayersJSON, &prizeStructureJSON,
 		&pointSchemeName, &pointSchemeType, &pointSchemeParams)
@@ -391,6 +397,7 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 		activeCount    int
 		tournamentName string
 		buyInAmount    string
+		audience       string
 	)
 	err = h.pool.QueryRow(c.Request().Context(),
 		`SELECT t.status, t.start_at, t.max_players,
@@ -398,11 +405,11 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 		         WHERE r.published_tournament_id = t.id
 		           AND r.status IN ('pending', 'confirmed'))
 		        + COALESCE(jsonb_array_length(t.local_players), 0),
-		        t.name, t.buy_in_amount::text
+		        t.name, t.buy_in_amount::text, t.audience
 		 FROM published_tournaments t
 		 WHERE t.id = $1 AND t.club_id = $2`,
 		tid, clubID,
-	).Scan(&status, &startAt, &maxPlayers, &activeCount, &tournamentName, &buyInAmount)
+	).Scan(&status, &startAt, &maxPlayers, &activeCount, &tournamentName, &buyInAmount, &audience)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "tournament_not_found"})
@@ -412,6 +419,14 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 	}
 	if status != "open" {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "registrations_closed"})
+	}
+	// Phase 0.F : inscription anonyme refusée pour les tournois members_only.
+	// L'utilisateur doit créer un compte joueur et adhérer au club d'abord.
+	if audience == "members_only" {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error":  "members_only",
+			"detail": "Ce tournoi est réservé aux membres du club. Connecte-toi et rejoins le club pour t'inscrire.",
+		})
 	}
 	if startAt.Before(time.Now()) {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "tournament_started"})

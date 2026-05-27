@@ -92,7 +92,7 @@ func (h *playersRegistrationsHandler) register(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "club_not_found"})
 	}
 
-	// État du tournoi + capacité.
+	// État du tournoi + capacité + audience.
 	var (
 		status         string
 		startAt        time.Time
@@ -100,6 +100,7 @@ func (h *playersRegistrationsHandler) register(c echo.Context) error {
 		activeCount    int
 		tournamentName string
 		buyInAmount    string
+		audience       string
 	)
 	err = h.pool.QueryRow(c.Request().Context(),
 		`SELECT t.status, t.start_at, t.max_players,
@@ -107,11 +108,11 @@ func (h *playersRegistrationsHandler) register(c echo.Context) error {
 		         WHERE r.published_tournament_id = t.id
 		           AND r.status IN ('pending', 'confirmed'))
 		        + COALESCE(jsonb_array_length(t.local_players), 0),
-		        t.name, t.buy_in_amount::text
+		        t.name, t.buy_in_amount::text, t.audience
 		 FROM published_tournaments t
 		 WHERE t.id = $1 AND t.club_id = $2`,
 		tid, clubID,
-	).Scan(&status, &startAt, &maxPlayers, &activeCount, &tournamentName, &buyInAmount)
+	).Scan(&status, &startAt, &maxPlayers, &activeCount, &tournamentName, &buyInAmount, &audience)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "tournament_not_found"})
@@ -127,6 +128,27 @@ func (h *playersRegistrationsHandler) register(c echo.Context) error {
 	}
 	if maxPlayers > 0 && activeCount >= maxPlayers {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "tournament_full"})
+	}
+
+	// Phase 0.F : si tournoi members_only, vérifie que le joueur a une
+	// membership active sur ce club.
+	if audience == "members_only" {
+		var hasActive bool
+		err := h.pool.QueryRow(c.Request().Context(),
+			`SELECT EXISTS(SELECT 1 FROM player_club_memberships
+			               WHERE player_id = $1 AND club_id = $2 AND status = 'active')`,
+			claims.PlayerID, clubID,
+		).Scan(&hasActive)
+		if err != nil {
+			h.logger.Error("player register: check membership", "err", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+		}
+		if !hasActive {
+			return c.JSON(http.StatusForbidden, map[string]string{
+				"error":  "membership_required",
+				"detail": "Ce tournoi est réservé aux membres du club. Demande l'adhésion au club d'abord.",
+			})
+		}
 	}
 
 	// Anti-doublon : par player_id (index unique partiel) ou par email

@@ -131,6 +131,13 @@ func Mount(e *echo.Echo, d Deps) {
 	clubAuditH := &clubAuditHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/audit", clubAuditH.search)
 
+	// Phase 0.F : modération des adhésions joueur ↔ club côté admin.
+	clubMembershipsH := &clubMembershipsHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.GET("/memberships", clubMembershipsH.list)
+	clubGroup.POST("/memberships/:id/approve", clubMembershipsH.approve)
+	clubGroup.POST("/memberships/:id/reject", clubMembershipsH.reject)
+	clubGroup.POST("/memberships/:id/revoke", clubMembershipsH.revoke)
+
 	// Phase 0.D-γ.1 : barème de points par club.
 	clubPointSchemesH := &clubPointSchemesHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/point-scheme", clubPointSchemesH.get)
@@ -216,6 +223,12 @@ func Mount(e *echo.Echo, d Deps) {
 	playersMeGroup.POST("/clubs/:slug/tournaments/:id/register", playersRegH.register)
 	playersMeGroup.DELETE("/registrations/:id", playersRegH.cancelMyRegistration)
 	playersMeGroup.GET("/registrations", playersRegH.listMyRegistrations)
+
+	// Phase 0.F : adhésions joueur ↔ club.
+	playersMembershipsH := &playersMembershipsHandler{pool: d.Pool, logger: d.Logger}
+	playersMeGroup.GET("/clubs", playersMembershipsH.listMyClubs)
+	playersMeGroup.POST("/clubs/:slug/join", playersMembershipsH.joinClub)
+	playersMeGroup.DELETE("/clubs/:slug", playersMembershipsH.leaveClub)
 
 	// /api/admin/* : routes super-admin (cross-clubs), réservées à Cédric.
 	// Double protection : JWT valide + claim role=superadmin.

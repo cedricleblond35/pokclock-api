@@ -44,6 +44,8 @@ type publishedTournament struct {
 	LocalPlayers        json.RawMessage `json:"localPlayers,omitempty"`
 	// Phase 0.D-β.2 : structure des prix calculée côté app
 	PrizeStructure      json.RawMessage `json:"prizeStructure,omitempty"`
+	// Phase 0.F : audience du tournoi. 'public' (par défaut) ou 'members_only'.
+	Audience            string          `json:"audience"`
 	PublishedByLicense  string          `json:"publishedByLicense"`
 	PublishedAt         time.Time       `json:"publishedAt"`
 	UpdatedAt           time.Time       `json:"updatedAt"`
@@ -80,6 +82,8 @@ type publishTournamentRequest struct {
 	// Phase 0.D-β.2 : structure des prix calculée côté WPF (jsonb opaque).
 	// Schéma : { prizePool, currency, rakeAmount, places: [{position, amount, percentage}] }
 	PrizeStructure      json.RawMessage `json:"prizeStructure,omitempty"`
+	// Phase 0.F : audience. nil = défaut "public". Valeurs valides : "public" | "members_only".
+	Audience            *string         `json:"audience,omitempty"`
 }
 
 var allowedDisplayModes = map[string]bool{
@@ -118,6 +122,7 @@ func (h *clubTournamentsHandler) list(c echo.Context) error {
 	             t.late_reg_enabled, t.late_reg_until_level,
 	             t.local_tournament_id, t.status, t.blinds_summary,
 	             t.show_players, t.players_display_mode, t.local_players, t.prize_structure,
+	             t.audience,
 	             t.published_by_license, t.published_at, t.updated_at,
 	             COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'pending'), 0) AS pending_count,
 	             COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0) AS confirmed_count
@@ -213,6 +218,16 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		prizeStructureArg = string(req.PrizeStructure)
 	}
 
+	// Phase 0.F : audience. Defaults to 'public'.
+	audience := "public"
+	if req.Audience != nil {
+		a := strings.TrimSpace(*req.Audience)
+		if a != "public" && a != "members_only" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_audience"})
+		}
+		audience = a
+	}
+
 	// UPSERT via INDEX UNIQUE (club_id, local_tournament_id) WHERE NOT NULL
 	// (cf. migration 011). Permet à l'app de re-cliquer "Publier en ligne"
 	// pour pousser ses modifs sans créer de doublon sur le site public.
@@ -226,9 +241,9 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		   (club_id, name, description, start_at, buy_in_amount, buy_in_fees,
 		    starting_stack, max_players, format, late_reg_enabled, late_reg_until_level,
 		    local_tournament_id, blinds_summary, published_by_license,
-		    show_players, players_display_mode, local_players, prize_structure)
+		    show_players, players_display_mode, local_players, prize_structure, audience)
 		 VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12, $13::jsonb, $14,
-		         $15, $16, $17::jsonb, $18::jsonb)
+		         $15, $16, $17::jsonb, $18::jsonb, $19)
 		 ON CONFLICT (club_id, local_tournament_id)
 		   WHERE local_tournament_id IS NOT NULL AND status <> 'cancelled'
 		   DO UPDATE SET
@@ -247,6 +262,7 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		     players_display_mode = EXCLUDED.players_display_mode,
 		     local_players = EXCLUDED.local_players,
 		     prize_structure = EXCLUDED.prize_structure,
+		     audience = EXCLUDED.audience,
 		     updated_at = now()
 		 RETURNING id, club_id, name, description, start_at,
 		           buy_in_amount::text, buy_in_fees::text,
@@ -254,6 +270,7 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		           late_reg_enabled, late_reg_until_level,
 		           local_tournament_id, status, blinds_summary,
 		           show_players, players_display_mode, local_players, prize_structure,
+		           audience,
 		           published_by_license, published_at, updated_at,
 		           (xmax = 0) AS was_inserted`,
 		claims.ClubID, req.Name, req.Description, startAt,
@@ -263,12 +280,14 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		req.LocalTournamentID, nullableRawJSON(req.BlindsSummary),
 		claims.Subject,
 		showPlayers, displayMode, localPlayersArg, prizeStructureArg,
+		audience,
 	).Scan(&t.ID, &t.ClubID, &t.Name, &t.Description, &t.StartAt,
 		&t.BuyInAmount, &t.BuyInFees,
 		&t.StartingStack, &t.MaxPlayers, &t.Format,
 		&t.LateRegEnabled, &t.LateRegUntilLevel,
 		&t.LocalTournamentID, &t.Status, &t.BlindsSummary,
 		&t.ShowPlayers, &t.PlayersDisplayMode, &t.LocalPlayers, &t.PrizeStructure,
+		&t.Audience,
 		&t.PublishedByLicense, &t.PublishedAt, &t.UpdatedAt,
 		&t.WasCreated)
 	if err != nil {
@@ -327,6 +346,7 @@ func scanPublishedTournament(r scanRowable) (publishedTournament, error) {
 		&t.LateRegEnabled, &t.LateRegUntilLevel,
 		&t.LocalTournamentID, &t.Status, &t.BlindsSummary,
 		&t.ShowPlayers, &t.PlayersDisplayMode, &t.LocalPlayers, &t.PrizeStructure,
+		&t.Audience,
 		&t.PublishedByLicense, &t.PublishedAt, &t.UpdatedAt,
 		&t.PendingCount, &t.ConfirmedCount)
 	return t, err
