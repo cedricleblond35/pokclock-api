@@ -32,6 +32,10 @@ type Deps struct {
 	// Phase 0.E.1 — domaine du cookie de session joueur (ex ".pokclock.com").
 	// Vide en dev local pour cookie limité à l'origine.
 	PlayerCookieDomain string
+	// Phase 0.E.1.e : credentials Google OAuth pour le login joueur.
+	// Vides = bouton désactivé côté front et endpoint /start renvoie 503.
+	GoogleOAuthClientID     string
+	GoogleOAuthClientSecret string
 	AllowedOrigins    []string
 	Logger            *slog.Logger
 	// SuperadminLicenseKeys : bootstrap mechanism. Si la licence du caller est
@@ -205,6 +209,20 @@ func Mount(e *echo.Echo, d Deps) {
 	playersAuthGroup.POST("/magic-link", playersAuthH.requestMagicLink)
 	playersAuthGroup.GET("/magic-link/verify", playersAuthH.verifyMagicLink)
 	playersAuthGroup.POST("/logout", playersAuthH.logout)
+
+	// Phase 0.E.1.e : Google OAuth login.
+	googleH := &playersGoogleOAuthHandler{
+		pool:          d.Pool,
+		signer:        d.Signer,
+		logger:        d.Logger,
+		clientID:      d.GoogleOAuthClientID,
+		clientSecret:  d.GoogleOAuthClientSecret,
+		publicSiteURL: d.PublicSiteURL,
+		apiBaseURL:    d.APIBaseURL,
+		cookieDomain:  d.PlayerCookieDomain,
+	}
+	playersAuthGroup.GET("/google/start", googleH.start)
+	playersAuthGroup.GET("/google/callback", googleH.callback)
 
 	playersMeH := &playersMeHandler{
 		pool:         d.Pool,

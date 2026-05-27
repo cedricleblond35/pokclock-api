@@ -92,6 +92,8 @@ func main() {
 		PublicSiteURL:         cfg.PublicSiteURL,
 		APIBaseURL:            cfg.APIBaseURL,
 		PlayerCookieDomain:    cfg.PlayerCookieDomain,
+		GoogleOAuthClientID:     cfg.GoogleOAuthClientID,
+		GoogleOAuthClientSecret: cfg.GoogleOAuthClientSecret,
 		AllowedOrigins:        cfg.AllowedOrigins,
 		Logger:                logger,
 		SuperadminLicenseKeys: cfg.SuperadminLicenseKeys,

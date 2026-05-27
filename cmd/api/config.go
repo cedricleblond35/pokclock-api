@@ -35,6 +35,12 @@ type Config struct {
 	EmailFrom     string // ex: "PokClock <noreply@pokclock.com>", domaine vérifié dans Resend
 	PublicSiteURL string // ex: "https://pokclock.com" — pour construire les liens d'annulation
 	APIBaseURL    string // ex: "https://api.pokclock.com" — pour les liens dans les emails magic link
+	// Google OAuth pour login joueur (Phase 0.E.1.e). Optionnels : si vides,
+	// le bouton "Continuer avec Google" est désactivé et l'endpoint /start
+	// retourne 503 google_oauth_disabled. Le secret est lu via FILE en
+	// priorité (Swarm secret), sinon en var d'env directe.
+	GoogleOAuthClientID     string
+	GoogleOAuthClientSecret string
 	// PlayerCookieDomain (Phase 0.E.1) : domaine du cookie de session joueur.
 	// En prod ".pokclock.com" pour que le cookie soit envoyé sur api.pokclock.com
 	// depuis le frontend pokclock.com. Vide en dev (cookie limité à l'origine).
@@ -84,6 +90,18 @@ func loadConfig() (Config, error) {
 	cfg.PublicSiteURL = strings.TrimRight(envOr("PUBLIC_SITE_URL", "https://pokclock.com"), "/")
 	cfg.APIBaseURL = strings.TrimRight(envOr("API_BASE_URL", "https://api.pokclock.com"), "/")
 	cfg.PlayerCookieDomain = strings.TrimSpace(os.Getenv("PLAYER_COOKIE_DOMAIN"))
+
+	// Google OAuth (Phase 0.E.1.e)
+	cfg.GoogleOAuthClientID = strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID"))
+	if path := strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET_FILE")); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return Config{}, fmt.Errorf("read google oauth secret file %s: %w", path, err)
+		}
+		cfg.GoogleOAuthClientSecret = strings.TrimSpace(string(b))
+	} else {
+		cfg.GoogleOAuthClientSecret = strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"))
+	}
 
 	origins := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
 	if origins != "" {
