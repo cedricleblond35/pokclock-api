@@ -18,6 +18,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	apihttp "github.com/cedricleblond35/pokclock-api/internal/api"
+	"github.com/cedricleblond35/pokclock-api/internal/clients/resend"
 	"github.com/cedricleblond35/pokclock-api/internal/clients/workeradmin"
 	"github.com/cedricleblond35/pokclock-api/internal/db"
 	"github.com/cedricleblond35/pokclock-api/internal/domain/auth"
@@ -69,6 +70,14 @@ func main() {
 		logger.Info("worker admin sync enabled", "url", cfg.WorkerAdminURL)
 	}
 
+	resendClient := resend.New(cfg.ResendAPIKey, cfg.EmailFrom, nil)
+	if !resendClient.IsConfigured() {
+		logger.Warn("resend emails disabled — RESEND_API_KEY or EMAIL_FROM missing",
+			"from_set", cfg.EmailFrom != "")
+	} else {
+		logger.Info("resend emails enabled", "from", cfg.EmailFrom, "site", cfg.PublicSiteURL)
+	}
+
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -79,6 +88,8 @@ func main() {
 		Signer:                signer,
 		WorkerClient:          workerClient,
 		WorkerAdminClient:     workerAdminClient,
+		ResendClient:          resendClient,
+		PublicSiteURL:         cfg.PublicSiteURL,
 		AllowedOrigins:        cfg.AllowedOrigins,
 		Logger:                logger,
 		SuperadminLicenseKeys: cfg.SuperadminLicenseKeys,

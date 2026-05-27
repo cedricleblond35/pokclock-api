@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -26,6 +27,7 @@ import (
 type publicTournamentsHandler struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
+	emails *emailContext // best-effort, peut être nil si Resend non configuré
 }
 
 // publicTournament : version publique d'un tournoi (info NON sensibles uniquement).
@@ -160,7 +162,7 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_email"})
 	}
 
-	clubID, _, ok, err := h.resolveClub(c, slug)
+	clubID, clubName, ok, err := h.resolveClub(c, slug)
 	if err != nil {
 		return err
 	}
@@ -168,22 +170,25 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "club_not_found"})
 	}
 
-	// État + capacité du tournoi
+	// État + capacité du tournoi (+ name + buy_in pour l'email)
 	var (
-		status       string
-		startAt      time.Time
-		maxPlayers   int
-		activeCount  int
+		status         string
+		startAt        time.Time
+		maxPlayers     int
+		activeCount    int
+		tournamentName string
+		buyInAmount    string
 	)
 	err = h.pool.QueryRow(c.Request().Context(),
 		`SELECT t.status, t.start_at, t.max_players,
 		        (SELECT COUNT(*) FROM tournament_registrations r
 		         WHERE r.published_tournament_id = t.id
-		           AND r.status IN ('pending', 'confirmed'))
+		           AND r.status IN ('pending', 'confirmed')),
+		        t.name, t.buy_in_amount::text
 		 FROM published_tournaments t
 		 WHERE t.id = $1 AND t.club_id = $2`,
 		tid, clubID,
-	).Scan(&status, &startAt, &maxPlayers, &activeCount)
+	).Scan(&status, &startAt, &maxPlayers, &activeCount, &tournamentName, &buyInAmount)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "tournament_not_found"})
@@ -237,7 +242,31 @@ func (h *publicTournamentsHandler) register(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
 	}
 	resp.Message = "Inscription reçue. L'organisateur du club doit la confirmer manuellement avant que ta place soit officielle. Tu peux annuler à tout moment via le lien d'annulation."
+
+	// Email best-effort de confirmation (avec lien magique d'annulation).
+	// Fire-and-forget : on n'attend pas l'envoi pour répondre au caller.
+	if h.emails != nil {
+		go h.emails.sendRegisterConfirmation(context.Background(), registerConfirmationData{
+			FirstName:      req.FirstName,
+			LastName:       req.LastName,
+			Email:          req.Email,
+			TournamentName: tournamentName,
+			TournamentDate: formatFRDateTime(startAt),
+			ClubName:       clubName,
+			BuyIn:          formatEuroAmount(buyInAmount),
+			CancelToken:    token,
+		})
+	}
+
 	return c.JSON(http.StatusCreated, resp)
+}
+
+// formatEuroAmount : "50.00" → "50,00 €". Helper local pour ne pas réimporter
+// golang.org/x/text/currency.
+func formatEuroAmount(raw string) string {
+	// Normalise "." en "," pour FR. Pas de parsing/format strict.
+	v := strings.ReplaceAll(raw, ".", ",")
+	return v + " €"
 }
 
 // cancelByToken : GET /public/registrations/:token/cancel

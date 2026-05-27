@@ -33,12 +33,19 @@ services:
       # depuis ops.pokclock.com ne seront pas activables par l'app cliente.
       WORKER_ADMIN_URL: "https://pokclock-license.dynamidoxa.workers.dev"
       WORKER_ADMIN_TOKEN_FILE: "/run/secrets/worker_admin_token"
+      # Emails Resend pour les inscriptions en ligne (Phase 0.D-α.1.b).
+      # Sans RESEND_API_KEY, les envois sont skipped silencieusement (le
+      # cancel_token reste accessible dans le JSON de réponse au register).
+      RESEND_API_KEY_FILE: "/run/secrets/resend_api_key"
+      EMAIL_FROM: "PokClock <noreply@pokclock.com>"
+      PUBLIC_SITE_URL: "https://pokclock.com"
       ALLOWED_ORIGINS: "https://pokclock.com,https://www.pokclock.com"
     secrets:
       - pg_password_pokclock
       - jwt_private_pokclock
       - jwt_public_pokclock
       - worker_admin_token
+      - resend_api_key
     networks:
       - nw-web
       - nw-pokclock
@@ -174,6 +181,8 @@ secrets:
   jwt_public_pokclock:
     external: true
   worker_admin_token:
+    external: true
+  resend_api_key:
     external: true
   restic_password:
     external: true

@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/cedricleblond35/pokclock-api/internal/clients/resend"
 	"github.com/cedricleblond35/pokclock-api/internal/clients/workeradmin"
 	"github.com/cedricleblond35/pokclock-api/internal/domain/auth"
 )
@@ -21,6 +22,9 @@ type Deps struct {
 	Signer            *auth.Signer
 	WorkerClient      *auth.WorkerClient
 	WorkerAdminClient *workeradmin.Client
+	// Phase 0.D-α.1.b — emails transactionnels d'inscriptions online.
+	ResendClient  *resend.Client
+	PublicSiteURL string
 	AllowedOrigins    []string
 	Logger            *slog.Logger
 	// SuperadminLicenseKeys : bootstrap mechanism. Si la licence du caller est
@@ -126,7 +130,17 @@ func Mount(e *echo.Echo, d Deps) {
 	clubGroup.POST("/tournaments/:id/close", clubTournamentsH.setStatus("closed"))
 	clubGroup.POST("/tournaments/:id/cancel", clubTournamentsH.setStatus("cancelled"))
 
-	clubRegistrationsH := &clubRegistrationsHandler{pool: d.Pool, logger: d.Logger}
+	emailCtx := &emailContext{
+		client:        d.ResendClient,
+		publicSiteURL: d.PublicSiteURL,
+		logger:        d.Logger,
+	}
+
+	clubRegistrationsH := &clubRegistrationsHandler{
+		pool:   d.Pool,
+		logger: d.Logger,
+		emails: emailCtx,
+	}
 	clubGroup.GET("/tournaments/:tid/registrations", clubRegistrationsH.list)
 	clubGroup.POST("/registrations/:id/confirm", clubRegistrationsH.confirm)
 	clubGroup.POST("/registrations/:id/reject", clubRegistrationsH.reject)
@@ -134,7 +148,11 @@ func Mount(e *echo.Echo, d Deps) {
 	// /public/* : endpoints anonymes consommés par le site pokclock.com/clubs/:slug.
 	// AUCUNE auth — rate-limit géré en amont (Cloudflare/Traefik).
 	publicGroup := e.Group("/public")
-	publicTournamentsH := &publicTournamentsHandler{pool: d.Pool, logger: d.Logger}
+	publicTournamentsH := &publicTournamentsHandler{
+		pool:   d.Pool,
+		logger: d.Logger,
+		emails: emailCtx,
+	}
 	publicGroup.GET("/clubs/:slug/tournaments", publicTournamentsH.listByClubSlug)
 	publicGroup.POST("/clubs/:slug/tournaments/:id/register", publicTournamentsH.register)
 	publicGroup.GET("/registrations/:token/cancel", publicTournamentsH.cancelByToken)

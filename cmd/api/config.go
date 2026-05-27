@@ -28,6 +28,12 @@ type Config struct {
 	// WorkerAdminToken est le Bearer ADMIN_TOKEN du Worker. Lu en priorité
 	// depuis WORKER_ADMIN_TOKEN_FILE (Swarm secret), sinon depuis l'env directe.
 	WorkerAdminToken string
+	// Resend (Phase 0.D-α.1.b) : emails transactionnels d'inscriptions online.
+	// Optionnels — si manquants, les emails sont skipped silencieusement et
+	// l'inscription se fait quand même (le cancel_token est renvoyé en JSON).
+	ResendAPIKey  string // RESEND_API_KEY_FILE (Swarm) ou RESEND_API_KEY direct
+	EmailFrom     string // ex: "PokClock <noreply@pokclock.com>", domaine vérifié dans Resend
+	PublicSiteURL string // ex: "https://pokclock.com" — pour construire les liens d'annulation
 	// SuperadminLicenseKeys est un mécanisme de bootstrap pour Phase 0.B :
 	// tant que le Worker /verify n'expose pas encore `role` dans sa réponse,
 	// on promeut explicitement certaines license keys en role=superadmin
@@ -58,6 +64,19 @@ func loadConfig() (Config, error) {
 	} else {
 		cfg.WorkerAdminToken = strings.TrimSpace(os.Getenv("WORKER_ADMIN_TOKEN"))
 	}
+
+	// Resend : RESEND_API_KEY_FILE (Swarm) prioritaire.
+	if path := strings.TrimSpace(os.Getenv("RESEND_API_KEY_FILE")); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return Config{}, fmt.Errorf("read resend api key file %s: %w", path, err)
+		}
+		cfg.ResendAPIKey = strings.TrimSpace(string(b))
+	} else {
+		cfg.ResendAPIKey = strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+	}
+	cfg.EmailFrom = envOr("EMAIL_FROM", "PokClock <noreply@pokclock.com>")
+	cfg.PublicSiteURL = strings.TrimRight(envOr("PUBLIC_SITE_URL", "https://pokclock.com"), "/")
 
 	origins := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
 	if origins != "" {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 type clubRegistrationsHandler struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
+	emails *emailContext // best-effort, peut être nil si Resend non configuré
 }
 
 type registration struct {
@@ -134,25 +136,34 @@ func (h *clubRegistrationsHandler) moderate(c echo.Context, target, expected str
 
 	// On UPDATE en filtrant aussi par club_id du tournoi parent (JOIN) — pas
 	// d'accès cross-club même en connaissant l'UUID de la registration.
-	var r registration
+	// On rapporte aussi le nom du tournoi et du club pour l'email.
+	var (
+		r              registration
+		tournamentName string
+		tournamentDate time.Time
+		clubName       string
+	)
 	err := h.pool.QueryRow(c.Request().Context(),
 		`UPDATE tournament_registrations r
 		 SET status = $3,
 		     moderated_by_license = $4,
 		     moderated_at = now(),
 		     moderation_reason = $5
-		 FROM published_tournaments t
+		 FROM published_tournaments t, clubs cl
 		 WHERE r.id = $1
 		   AND r.published_tournament_id = t.id
 		   AND t.club_id = $2
+		   AND cl.id = t.club_id
 		   AND r.status = $6
 		 RETURNING r.id, r.published_tournament_id, r.first_name, r.last_name,
 		           r.email, r.phone, r.status, r.moderated_by_license,
-		           r.moderated_at, r.moderation_reason, r.registered_at, r.updated_at`,
+		           r.moderated_at, r.moderation_reason, r.registered_at, r.updated_at,
+		           t.name, t.start_at, cl.name`,
 		rid, claims.ClubID, target, claims.Subject, req.Reason, expected,
 	).Scan(&r.ID, &r.PublishedTournamentID, &r.FirstName, &r.LastName,
 		&r.Email, &r.Phone, &r.Status, &r.ModeratedByLicense, &r.ModeratedAt,
-		&r.ModerationReason, &r.RegisteredAt, &r.UpdatedAt)
+		&r.ModerationReason, &r.RegisteredAt, &r.UpdatedAt,
+		&tournamentName, &tournamentDate, &clubName)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Soit la registration n'existe pas, soit le tournoi n'est pas
@@ -166,7 +177,36 @@ func (h *clubRegistrationsHandler) moderate(c echo.Context, target, expected str
 		h.logger.Error("moderate registration", "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_write"})
 	}
+
+	// Email best-effort post-modération.
+	if h.emails != nil {
+		reason := ""
+		if req.Reason != nil {
+			reason = *req.Reason
+		}
+		go h.emails.sendModerationDecision(context.Background(), moderationDecisionData{
+			FirstName:      r.FirstName,
+			LastName:       r.LastName,
+			Email:          r.Email,
+			TournamentName: tournamentName,
+			TournamentDate: formatFRDateTime(tournamentDate),
+			ClubName:       clubName,
+			Confirmed:      target == "confirmed",
+			Reason:         reason,
+		})
+	}
+
 	return c.JSON(http.StatusOK, r)
+}
+
+// formatFRDateTime : "lun. 26 mai 2026 à 18:00" — local time du serveur.
+// Garde le format simple pour rester portable cross-OS.
+func formatFRDateTime(t time.Time) string {
+	loc, _ := time.LoadLocation("Europe/Paris")
+	if loc != nil {
+		t = t.In(loc)
+	}
+	return t.Format("02/01/2006 à 15:04")
 }
 
 // assertTournamentInClub : retourne nil + écrit la réponse 404 si le tournoi
