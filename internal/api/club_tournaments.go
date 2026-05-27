@@ -38,6 +38,10 @@ type publishedTournament struct {
 	LocalTournamentID   *int            `json:"localTournamentId,omitempty"`
 	Status              string          `json:"status"`
 	BlindsSummary       json.RawMessage `json:"blindsSummary,omitempty"`
+	// Phase 0.D-β.1 : affichage public de la liste joueurs
+	ShowPlayers         bool            `json:"showPlayers"`
+	PlayersDisplayMode  string          `json:"playersDisplayMode"`
+	LocalPlayers        json.RawMessage `json:"localPlayers,omitempty"`
 	PublishedByLicense  string          `json:"publishedByLicense"`
 	PublishedAt         time.Time       `json:"publishedAt"`
 	UpdatedAt           time.Time       `json:"updatedAt"`
@@ -63,6 +67,21 @@ type publishTournamentRequest struct {
 	LateRegUntilLevel   *int            `json:"lateRegUntilLevel,omitempty"`
 	LocalTournamentID   *int            `json:"localTournamentId,omitempty"`
 	BlindsSummary       json.RawMessage `json:"blindsSummary,omitempty"`
+	// Phase 0.D-β.1 : settings d'affichage public des joueurs.
+	// Si nil, valeurs par défaut côté backend (show=false, mode=hidden).
+	ShowPlayers         *bool           `json:"showPlayers,omitempty"`
+	PlayersDisplayMode  *string         `json:"playersDisplayMode,omitempty"`
+	// LocalPlayers : snapshot des TournamentPlayer locaux à pousser.
+	// Schéma : [{"firstName","lastName","nickname"}]. Pas validé côté backend
+	// (jsonb opaque) — on fait confiance au caller WPF pour le format.
+	LocalPlayers        json.RawMessage `json:"localPlayers,omitempty"`
+}
+
+var allowedDisplayModes = map[string]bool{
+	"hidden":             true,
+	"pseudo":             true,
+	"first_initial_last": true,
+	"full_name":          true,
 }
 
 const (
@@ -93,6 +112,7 @@ func (h *clubTournamentsHandler) list(c echo.Context) error {
 	             t.starting_stack, t.max_players, t.format,
 	             t.late_reg_enabled, t.late_reg_until_level,
 	             t.local_tournament_id, t.status, t.blinds_summary,
+	             t.show_players, t.players_display_mode, t.local_players,
 	             t.published_by_license, t.published_at, t.updated_at,
 	             COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'pending'), 0) AS pending_count,
 	             COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0) AS confirmed_count
@@ -164,6 +184,25 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_start_at"})
 	}
 
+	// Phase 0.D-β.1 : settings d'affichage. Defaults backend si non fournis.
+	showPlayers := false
+	if req.ShowPlayers != nil {
+		showPlayers = *req.ShowPlayers
+	}
+	displayMode := "hidden"
+	if req.PlayersDisplayMode != nil {
+		dm := strings.TrimSpace(*req.PlayersDisplayMode)
+		if !allowedDisplayModes[dm] {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_display_mode"})
+		}
+		displayMode = dm
+	}
+	// localPlayers default = [] si non fourni
+	var localPlayersArg any = "[]"
+	if len(req.LocalPlayers) > 0 {
+		localPlayersArg = string(req.LocalPlayers)
+	}
+
 	// UPSERT via INDEX UNIQUE (club_id, local_tournament_id) WHERE NOT NULL
 	// (cf. migration 011). Permet à l'app de re-cliquer "Publier en ligne"
 	// pour pousser ses modifs sans créer de doublon sur le site public.
@@ -176,8 +215,10 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		`INSERT INTO published_tournaments
 		   (club_id, name, description, start_at, buy_in_amount, buy_in_fees,
 		    starting_stack, max_players, format, late_reg_enabled, late_reg_until_level,
-		    local_tournament_id, blinds_summary, published_by_license)
-		 VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12, $13::jsonb, $14)
+		    local_tournament_id, blinds_summary, published_by_license,
+		    show_players, players_display_mode, local_players)
+		 VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12, $13::jsonb, $14,
+		         $15, $16, $17::jsonb)
 		 ON CONFLICT (club_id, local_tournament_id)
 		   WHERE local_tournament_id IS NOT NULL AND status <> 'cancelled'
 		   DO UPDATE SET
@@ -192,12 +233,16 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		     late_reg_enabled = EXCLUDED.late_reg_enabled,
 		     late_reg_until_level = EXCLUDED.late_reg_until_level,
 		     blinds_summary = EXCLUDED.blinds_summary,
+		     show_players = EXCLUDED.show_players,
+		     players_display_mode = EXCLUDED.players_display_mode,
+		     local_players = EXCLUDED.local_players,
 		     updated_at = now()
 		 RETURNING id, club_id, name, description, start_at,
 		           buy_in_amount::text, buy_in_fees::text,
 		           starting_stack, max_players, format,
 		           late_reg_enabled, late_reg_until_level,
 		           local_tournament_id, status, blinds_summary,
+		           show_players, players_display_mode, local_players,
 		           published_by_license, published_at, updated_at,
 		           (xmax = 0) AS was_inserted`,
 		claims.ClubID, req.Name, req.Description, startAt,
@@ -206,11 +251,13 @@ func (h *clubTournamentsHandler) publish(c echo.Context) error {
 		req.LateRegEnabled, req.LateRegUntilLevel,
 		req.LocalTournamentID, nullableRawJSON(req.BlindsSummary),
 		claims.Subject,
+		showPlayers, displayMode, localPlayersArg,
 	).Scan(&t.ID, &t.ClubID, &t.Name, &t.Description, &t.StartAt,
 		&t.BuyInAmount, &t.BuyInFees,
 		&t.StartingStack, &t.MaxPlayers, &t.Format,
 		&t.LateRegEnabled, &t.LateRegUntilLevel,
 		&t.LocalTournamentID, &t.Status, &t.BlindsSummary,
+		&t.ShowPlayers, &t.PlayersDisplayMode, &t.LocalPlayers,
 		&t.PublishedByLicense, &t.PublishedAt, &t.UpdatedAt,
 		&t.WasCreated)
 	if err != nil {
@@ -268,6 +315,7 @@ func scanPublishedTournament(r scanRowable) (publishedTournament, error) {
 		&t.StartingStack, &t.MaxPlayers, &t.Format,
 		&t.LateRegEnabled, &t.LateRegUntilLevel,
 		&t.LocalTournamentID, &t.Status, &t.BlindsSummary,
+		&t.ShowPlayers, &t.PlayersDisplayMode, &t.LocalPlayers,
 		&t.PublishedByLicense, &t.PublishedAt, &t.UpdatedAt,
 		&t.PendingCount, &t.ConfirmedCount)
 	return t, err

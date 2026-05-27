@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -112,6 +113,172 @@ func (h *publicTournamentsHandler) listByClubSlug(c echo.Context) error {
 		"tournaments": out,
 		"club":        map[string]any{"id": clubID, "name": clubName, "slug": slug},
 	})
+}
+
+// publicTournamentDetail : version "détail" pour la page d'un tournoi publié.
+// Inclut un display name optionnel des joueurs selon les settings d'affichage
+// du club (show_players + players_display_mode).
+type publicTournamentDetail struct {
+	publicTournament
+	// Players : liste anonymisée selon le display mode. Vide si show_players=false.
+	Players []string `json:"players"`
+}
+
+// localPlayerRecord : élément du JSON local_players stocké côté backend.
+// Mirror exact du payload poussé par WPF — pas de validation, JSONB opaque.
+type localPlayerRecord struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Nickname  string `json:"nickname"`
+}
+
+// getByClubSlug : GET /public/clubs/:slug/tournaments/:id
+// Retourne le détail d'un tournoi + (si show_players) la liste anonymisée
+// selon le display mode choisi par l'admin.
+//
+// Sources fusionnées :
+//   - tournament_registrations status='confirmed' (online sign-ups)
+//   - published_tournaments.local_players (joueurs locaux poussés depuis app)
+//
+// Privacy : la liste est filtrée AVANT serialization JSON. Le client public
+// n'a jamais accès aux noms complets si le mode ne le permet pas.
+func (h *publicTournamentsHandler) getByClubSlug(c echo.Context) error {
+	slug := strings.TrimSpace(c.Param("slug"))
+	id := strings.TrimSpace(c.Param("id"))
+	if slug == "" || id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing_params"})
+	}
+
+	clubID, clubName, ok, err := h.resolveClub(c, slug)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "club_not_found"})
+	}
+
+	var (
+		t                publicTournament
+		showPlayers      bool
+		displayMode      string
+		localPlayersJSON []byte
+	)
+	err = h.pool.QueryRow(c.Request().Context(),
+		`SELECT t.id, t.club_id, t.name, t.description, t.start_at,
+		        t.buy_in_amount::text, t.buy_in_fees::text,
+		        t.starting_stack, t.max_players, t.format,
+		        t.late_reg_enabled, t.late_reg_until_level, t.status,
+		        COALESCE((SELECT COUNT(*) FROM tournament_registrations r WHERE r.published_tournament_id = t.id AND r.status = 'confirmed'), 0),
+		        t.show_players, t.players_display_mode, t.local_players
+		 FROM published_tournaments t
+		 WHERE t.id = $1 AND t.club_id = $2
+		   AND t.status IN ('open', 'closed')`,
+		id, clubID,
+	).Scan(&t.ID, &t.ClubID, &t.Name, &t.Description, &t.StartAt,
+		&t.BuyInAmount, &t.BuyInFees,
+		&t.StartingStack, &t.MaxPlayers, &t.Format,
+		&t.LateRegEnabled, &t.LateRegUntilLevel, &t.Status, &t.ConfirmedCount,
+		&showPlayers, &displayMode, &localPlayersJSON)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "tournament_not_found"})
+		}
+		h.logger.Error("public get tournament", "err", err, "slug", slug, "id", id)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
+	}
+	t.ClubName = clubName
+	if t.MaxPlayers > 0 {
+		spots := t.MaxPlayers - t.ConfirmedCount
+		if spots < 0 {
+			spots = 0
+		}
+		t.SpotsLeft = &spots
+	}
+
+	detail := publicTournamentDetail{publicTournament: t, Players: []string{}}
+	if !showPlayers || displayMode == "hidden" {
+		return c.JSON(http.StatusOK, detail)
+	}
+
+	// Collecte les joueurs : online confirmed + local snapshot.
+	players, err := h.collectVisiblePlayers(c, id, localPlayersJSON, displayMode)
+	if err != nil {
+		// Best-effort : on retourne le tournoi sans players plutôt que 500
+		h.logger.Error("collect visible players", "err", err)
+	} else {
+		detail.Players = players
+	}
+	return c.JSON(http.StatusOK, detail)
+}
+
+// collectVisiblePlayers fusionne les sources et applique le filtre display mode.
+func (h *publicTournamentsHandler) collectVisiblePlayers(c echo.Context, tournamentID string,
+	localPlayersJSON []byte, mode string) ([]string, error) {
+
+	out := make([]string, 0, 32)
+
+	// 1. Online confirmed registrations
+	rows, err := h.pool.Query(c.Request().Context(),
+		`SELECT first_name, last_name FROM tournament_registrations
+		 WHERE published_tournament_id = $1 AND status = 'confirmed'
+		 ORDER BY registered_at`,
+		tournamentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fn, ln string
+		if err := rows.Scan(&fn, &ln); err != nil {
+			return nil, err
+		}
+		// Pas de nickname côté online (le form n'en demande pas) → mode pseudo
+		// retombe sur "Prénom" pour ces inscriptions.
+		out = append(out, formatPlayerName(fn, ln, "" /* no nickname */, mode))
+	}
+
+	// 2. Local players snapshot
+	if len(localPlayersJSON) > 0 {
+		var locals []localPlayerRecord
+		if err := json.Unmarshal(localPlayersJSON, &locals); err == nil {
+			for _, p := range locals {
+				out = append(out, formatPlayerName(p.FirstName, p.LastName, p.Nickname, mode))
+			}
+		}
+	}
+	return out, nil
+}
+
+// formatPlayerName applique le display mode à un joueur. Si le champ requis
+// est vide, fallback sensé (ex: mode='pseudo' sans nickname → "Prénom").
+func formatPlayerName(firstName, lastName, nickname, mode string) string {
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	nickname = strings.TrimSpace(nickname)
+	switch mode {
+	case "full_name":
+		if firstName != "" && lastName != "" {
+			return firstName + " " + lastName
+		}
+		if firstName != "" {
+			return firstName
+		}
+		return lastName
+	case "first_initial_last":
+		if firstName != "" && lastName != "" {
+			return firstName + " " + lastName[:1] + "."
+		}
+		return firstName + lastName
+	case "pseudo":
+		if nickname != "" {
+			return nickname
+		}
+		// Fallback pour les inscriptions online qui n'ont pas de pseudo : prénom seul
+		return firstName
+	}
+	// hidden ou inconnu → on retourne anonyme (devrait pas arriver, on filtre avant)
+	return "Anonyme"
 }
 
 type publicRegisterRequest struct {

@@ -154,6 +154,7 @@ func Mount(e *echo.Echo, d Deps) {
 		emails: emailCtx,
 	}
 	publicGroup.GET("/clubs/:slug/tournaments", publicTournamentsH.listByClubSlug)
+	publicGroup.GET("/clubs/:slug/tournaments/:id", publicTournamentsH.getByClubSlug)
 	publicGroup.POST("/clubs/:slug/tournaments/:id/register", publicTournamentsH.register)
 	publicGroup.GET("/registrations/:token/cancel", publicTournamentsH.cancelByToken)
 
