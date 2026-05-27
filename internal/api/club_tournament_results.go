@@ -88,6 +88,15 @@ func (h *clubTournamentResultsHandler) publishResults(c echo.Context) error {
 			h.logger.Error("fetch point scheme", "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
 		}
+		// Phase 0.D-γ.3 : le type 'custom' est évalué côté WPF (NCalc) parce que
+		// la formule peut référencer prizePool/buyIn que le backend n'a pas en
+		// contexte. Le caller doit envoyer les points explicites dans req.Results.
+		if schemeType == "custom" {
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"error":  "custom_scheme_requires_explicit_points",
+				"detail": "Le barème 'custom' nécessite que le caller calcule les points et les envoie dans chaque entrée. Passe applyPointScheme=false et inclus 'points' dans chaque entry.",
+			})
+		}
 	}
 	totalPlayers := len(req.Results)
 

@@ -38,6 +38,7 @@ var validPointSchemeTypes = map[string]struct{}{
 	"linear":       {},
 	"fixed":        {},
 	"proportional": {},
+	"custom":       {}, // Phase 0.D-γ.3 : formule NCalc évaluée côté WPF
 }
 
 // GET /api/club/point-scheme — retourne le barème du club, 404 si pas configuré.
