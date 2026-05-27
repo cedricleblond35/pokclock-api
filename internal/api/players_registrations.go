@@ -23,9 +23,10 @@ import (
 //     anonyme du même email avant qu'il crée son compte)
 //   - first_name / last_name lus depuis players (ou body si fournis)
 type playersRegistrationsHandler struct {
-	pool   *pgxpool.Pool
-	logger *slog.Logger
-	emails *emailContext
+	pool    *pgxpool.Pool
+	logger  *slog.Logger
+	emails  *emailContext
+	calSync *calendarSync
 }
 
 type playerRegisterRequest struct {
@@ -212,6 +213,12 @@ func (h *playersRegistrationsHandler) register(c echo.Context) error {
 		})
 	}
 
+	// Phase 0.E.5 : sync Google Calendar best-effort si le joueur a connecté
+	// son agenda. Fire-and-forget — l'inscription DB est déjà commit.
+	if h.calSync != nil {
+		go h.calSync.OnRegistration(context.Background(), resp.ID)
+	}
+
 	return c.JSON(http.StatusCreated, resp)
 }
 
@@ -243,6 +250,12 @@ func (h *playersRegistrationsHandler) cancelMyRegistration(c echo.Context) error
 	if tag.RowsAffected() == 0 {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found_or_already_cancelled"})
 	}
+
+	// Phase 0.E.5 : delete l'event Calendar associé si applicable.
+	if h.calSync != nil {
+		go h.calSync.OnStatusChange(context.Background(), regID, "cancelled")
+	}
+
 	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
 }
 

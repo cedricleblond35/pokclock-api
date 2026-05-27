@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/cedricleblond35/pokclock-api/internal/clients/googlecal"
 	"github.com/cedricleblond35/pokclock-api/internal/clients/resend"
 	"github.com/cedricleblond35/pokclock-api/internal/clients/workeradmin"
 	"github.com/cedricleblond35/pokclock-api/internal/domain/auth"
@@ -166,10 +167,18 @@ func Mount(e *echo.Echo, d Deps) {
 		logger:        d.Logger,
 	}
 
+	// Phase 0.E.5 : client + sync service Calendar partagés entre les
+	// handlers de registration (player + admin moderation) et les endpoints
+	// /api/players/me/google-calendar/*. Instanciés tôt parce que plusieurs
+	// handlers en bas du fichier les référencent.
+	calClient := googlecal.New()
+	calSync := newCalendarSync(d.Pool, d.Logger, calClient, d.GoogleOAuthClientID, d.GoogleOAuthClientSecret)
+
 	clubRegistrationsH := &clubRegistrationsHandler{
-		pool:   d.Pool,
-		logger: d.Logger,
-		emails: emailCtx,
+		pool:    d.Pool,
+		logger:  d.Logger,
+		emails:  emailCtx,
+		calSync: calSync,
 	}
 	clubGroup.GET("/tournaments/:tid/registrations", clubRegistrationsH.list)
 	clubGroup.POST("/registrations/:id/confirm", clubRegistrationsH.confirm)
@@ -179,9 +188,10 @@ func Mount(e *echo.Echo, d Deps) {
 	// AUCUNE auth — rate-limit géré en amont (Cloudflare/Traefik).
 	publicGroup := e.Group("/public")
 	publicTournamentsH := &publicTournamentsHandler{
-		pool:   d.Pool,
-		logger: d.Logger,
-		emails: emailCtx,
+		pool:    d.Pool,
+		logger:  d.Logger,
+		emails:  emailCtx,
+		calSync: calSync,
 	}
 	publicGroup.GET("/clubs/:slug/tournaments", publicTournamentsH.listByClubSlug)
 	publicGroup.GET("/clubs/:slug/tournaments/:id", publicTournamentsH.getByClubSlug)
@@ -224,6 +234,19 @@ func Mount(e *echo.Echo, d Deps) {
 	playersAuthGroup.GET("/google/start", googleH.start)
 	playersAuthGroup.GET("/google/callback", googleH.callback)
 
+	// Phase 0.E.5 : handler endpoints connect/disconnect Calendar (calClient
+	// et calSync sont déjà instanciés plus haut pour servir clubRegistrationsH).
+	calendarH := &playersCalendarHandler{
+		pool:          d.Pool,
+		logger:        d.Logger,
+		clientID:      d.GoogleOAuthClientID,
+		clientSecret:  d.GoogleOAuthClientSecret,
+		publicSiteURL: d.PublicSiteURL,
+		apiBaseURL:    d.APIBaseURL,
+		cookieDomain:  d.PlayerCookieDomain,
+		calClient:     calClient,
+	}
+
 	playersMeH := &playersMeHandler{
 		pool:         d.Pool,
 		logger:       d.Logger,
@@ -237,10 +260,16 @@ func Mount(e *echo.Echo, d Deps) {
 	playersMeGroup.DELETE("", playersMeH.deleteMe)
 
 	// Phase 0.E.2 : inscription / cancel / liste via compte joueur.
-	playersRegH := &playersRegistrationsHandler{pool: d.Pool, logger: d.Logger, emails: emailCtx}
+	playersRegH := &playersRegistrationsHandler{pool: d.Pool, logger: d.Logger, emails: emailCtx, calSync: calSync}
 	playersMeGroup.POST("/clubs/:slug/tournaments/:id/register", playersRegH.register)
 	playersMeGroup.DELETE("/registrations/:id", playersRegH.cancelMyRegistration)
 	playersMeGroup.GET("/registrations", playersRegH.listMyRegistrations)
+
+	// Phase 0.E.5 : connexion/déconnexion Google Calendar pour le joueur.
+	playersMeGroup.GET("/google-calendar", calendarH.status)
+	playersMeGroup.GET("/google-calendar/start", calendarH.start)
+	playersMeGroup.GET("/google-calendar/callback", calendarH.callback)
+	playersMeGroup.DELETE("/google-calendar", calendarH.disconnect)
 
 	// Phase 0.F : adhésions joueur ↔ club.
 	playersMembershipsH := &playersMembershipsHandler{pool: d.Pool, logger: d.Logger}

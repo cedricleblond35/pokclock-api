@@ -26,9 +26,10 @@ import (
 //   - Rate limit recommandé en amont (Cloudflare ou Traefik), pas géré ici
 //   - Cancel token : URL-safe random 32 bytes (256 bits) — non bruteforçable
 type publicTournamentsHandler struct {
-	pool   *pgxpool.Pool
-	logger *slog.Logger
-	emails *emailContext // best-effort, peut être nil si Resend non configuré
+	pool    *pgxpool.Pool
+	logger  *slog.Logger
+	emails  *emailContext // best-effort, peut être nil si Resend non configuré
+	calSync *calendarSync // best-effort, peut être nil
 }
 
 // publicTournament : version publique d'un tournoi (info NON sensibles uniquement).
@@ -525,6 +526,13 @@ func (h *publicTournamentsHandler) cancelByToken(c echo.Context) error {
 			"error": "not_found_or_already_cancelled",
 		})
 	}
+
+	// Phase 0.E.5 : si la registration a un player_id et un google_event_id,
+	// delete l'event Calendar. Best-effort.
+	if h.calSync != nil {
+		go h.calSync.OnPlayerCancelByToken(context.Background(), token)
+	}
+
 	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
 }
 

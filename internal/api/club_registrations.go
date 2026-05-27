@@ -17,9 +17,10 @@ import (
 // clubRegistrationsHandler : modération des inscriptions en ligne.
 // Routes /api/club/tournaments/:tid/registrations + actions confirm/reject.
 type clubRegistrationsHandler struct {
-	pool   *pgxpool.Pool
-	logger *slog.Logger
-	emails *emailContext // best-effort, peut être nil si Resend non configuré
+	pool    *pgxpool.Pool
+	logger  *slog.Logger
+	emails  *emailContext // best-effort, peut être nil si Resend non configuré
+	calSync *calendarSync // best-effort, peut être nil si Google OAuth non configuré
 }
 
 type registration struct {
@@ -194,6 +195,11 @@ func (h *clubRegistrationsHandler) moderate(c echo.Context, target, expected str
 			Confirmed:      target == "confirmed",
 			Reason:         reason,
 		})
+	}
+
+	// Phase 0.E.5 : sync Calendar (update event si confirmed, delete si rejected).
+	if h.calSync != nil {
+		go h.calSync.OnStatusChange(context.Background(), r.ID, target)
 	}
 
 	return c.JSON(http.StatusOK, r)
