@@ -144,6 +144,10 @@ func Mount(e *echo.Echo, d Deps) {
 	clubGroup.POST("/tournaments/:id/close", clubTournamentsH.setStatus("closed"))
 	clubGroup.POST("/tournaments/:id/cancel", clubTournamentsH.setStatus("cancelled"))
 
+	// Phase 0.E.4 : publication des résultats finaux d'un tournoi.
+	clubResultsH := &clubTournamentResultsHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.POST("/tournaments/:id/results", clubResultsH.publishResults)
+
 	emailCtx := &emailContext{
 		client:        d.ResendClient,
 		publicSiteURL: d.PublicSiteURL,
@@ -172,6 +176,11 @@ func Mount(e *echo.Echo, d Deps) {
 	publicGroup.GET("/clubs/:slug/tournaments/:id", publicTournamentsH.getByClubSlug)
 	publicGroup.POST("/clubs/:slug/tournaments/:id/register", publicTournamentsH.register)
 	publicGroup.GET("/registrations/:token/cancel", publicTournamentsH.cancelByToken)
+
+	// Phase 0.E.4 : résultats de tournoi + leaderboard club.
+	publicResultsH := &publicResultsHandler{pool: d.Pool, logger: d.Logger}
+	publicGroup.GET("/clubs/:slug/tournaments/:id/results", publicResultsH.getResults)
+	publicGroup.GET("/clubs/:slug/leaderboard", publicResultsH.getLeaderboard)
 
 	// /api/players/* : comptes joueurs (Phase 0.E.1).
 	playersAuthH := &playersAuthHandler{
