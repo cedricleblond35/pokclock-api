@@ -1,9 +1,23 @@
 # pokclock-api
 
-Backend Go pour les features cloud de PokClock : Passeport (licence), Live, Inscriptions, Multi-Canaux.
+Backend Go pour les features cloud de PokClock. Couvre l'auth license desktop, l'admin super-admin / club, les tournois publiés, les inscriptions online, les comptes joueurs et le leaderboard.
 
-Déployé sur `https://api.pokclock.com` via Docker Swarm + Traefik (DNS-01 wildcard OVH).
-Stack : **Echo v4**, **pgx/v5**, **golang-jwt/v5**, **goose** pour les migrations.
+Déployé sur `https://api.pokclock.com` via Docker Swarm + Traefik (Cloudflare DNS-01 wildcard).
+Stack : **Echo v4**, **pgx/v5**, **golang-jwt/v5**, **goose** pour les migrations, **Resend** HTTP pour les emails.
+
+## État au 2026-05-27
+
+| Phase | État | Détail |
+|---|---|---|
+| 0.A — Foundation | livré 2026-05-24 | Postgres + JWT + Worker /verify + R2 backup |
+| 0.B — RBAC + ops.pokclock.com | livré 2026-05-25 | claims `role` + `club_id`, `/api/admin/*`, `pokclock-ops` Next.js |
+| 0.C — Club ops baseline | livré 2026-05-27 | members CRUD, licenses club-scoped, audit, structures partagées |
+| 0.D — Tournois publiés + inscriptions | livré 2026-05-27 | `/public/clubs/:slug/tournaments`, prize structure, barème points |
+| 0.E — Comptes joueurs | livré 2026-05-27 (sauf Google) | magic link, leaderboard, dialog résultats WPF |
+| 0.E.1.e Google OAuth login | pending | besoin nouveau client OAuth GCP |
+| 0.E.5 Google Calendar sync | pending | OAuth scope séparé |
+
+Détail phase par phase : `~/workspace/PHASE-0B-OPS-ROADMAP.md` § "Bilan 2026-05-27".
 
 ## Démarrage rapide
 
@@ -29,17 +43,68 @@ make run
 
 ## Endpoints
 
+### Publics (anonymes, rate-limit en amont)
+
+| Méthode | Chemin | Description |
+|---|---|---|
+| GET | `/api/health` | Healthcheck JSON, retourne le build SHA |
+| GET | `/.well-known/jwks.json` | Clé publique au format JWKS |
+| POST | `/api/auth/issue` | Forward la licence au Worker, émet un JWT desktop (audience `pokclock-desktop`) |
+| POST | `/api/auth/refresh` | Rotation du JWT + refresh token |
+| GET | `/public/clubs/:slug/tournaments` | Liste publique des tournois ouverts du club |
+| GET | `/public/clubs/:slug/tournaments/:id` | Détail tournoi (incl. joueurs, prize structure, barème points) |
+| POST | `/public/clubs/:slug/tournaments/:id/register` | Inscription anonyme (firstName/lastName/email/phone), renvoie cancel_token |
+| GET | `/public/registrations/:token/cancel` | Annulation via magic link email |
+| GET | `/public/clubs/:slug/tournaments/:id/results` | Résultats finaux d'un tournoi |
+| GET | `/public/clubs/:slug/leaderboard` | Classement cumulé cross-tournois |
+
+### Comptes joueurs (Phase 0.E)
+
 | Méthode | Chemin | Auth | Description |
 |---|---|---|---|
-| GET | `/api/health` | non | Healthcheck JSON, retourne le build SHA |
-| POST | `/api/auth/issue` | non | Forward la licence au Worker Cloudflare, émet un JWT RS256 24h |
-| POST | `/api/auth/refresh` | refresh token | Rotation du JWT + nouveau refresh token |
-| POST | `/api/structures` | JWT | Créer une structure (club, casino, etc.) |
-| GET | `/api/structures/{slug}` | JWT | Lire une structure |
-| PATCH | `/api/structures/{slug}` | JWT | Modifier une structure (avec audit log) |
-| GET | `/.well-known/jwks.json` | non | Clé publique au format JWKS pour validation côté client |
+| POST | `/api/players/auth/magic-link` | non | Envoie un lien de connexion par email (15 min, single-use). Réponse toujours 202 (anti-énumération). |
+| GET | `/api/players/auth/magic-link/verify?token=…` | non | Consomme le token, upsert player, pose cookie `pokclock_player` JWT (audience `pokclock-player`), redirige vers `/joueurs/dashboard` |
+| POST | `/api/players/auth/logout` | cookie | Efface le cookie de session |
+| GET | `/api/players/me` | cookie | Profil joueur |
+| PATCH | `/api/players/me` | cookie | Modifie firstName/lastName |
+| POST | `/api/players/me/clubs/:slug/tournaments/:id/register` | cookie | Inscription en un clic (prefille depuis le profil) |
+| DELETE | `/api/players/me/registrations/:id` | cookie | Annule sa propre inscription |
+| GET | `/api/players/me/registrations` | cookie | Liste les inscriptions du joueur (passées + à venir) |
 
-## Flow auth
+### Club admin (`/api/club/*`, JWT desktop avec role admin ou superadmin)
+
+| Méthode | Chemin | Description |
+|---|---|---|
+| GET | `/api/club/info` | Métadonnées du club |
+| PATCH | `/api/club/online-registrations` | Toggle opt-in inscriptions online |
+| GET / POST / PATCH / DELETE | `/api/club/members` | CRUD membres |
+| POST | `/api/club/licenses/:id/assign-member` | Lier license à un membre |
+| GET / POST / POST `:id/revoke` | `/api/club/licenses` | Licenses du club |
+| GET | `/api/club/audit` | Audit log scope club |
+| GET / POST | `/api/club/tournaments` | Tournois publiés (UPSERT à chaque publish) |
+| POST | `/api/club/tournaments/:id/close` | Clôt les inscriptions |
+| POST | `/api/club/tournaments/:id/cancel` | Annule le tournoi publié |
+| POST | `/api/club/tournaments/:id/results` | Publie le classement final (avec ou sans calcul auto via barème) |
+| GET | `/api/club/tournaments/:tid/registrations` | Liste les inscriptions à modérer |
+| POST | `/api/club/registrations/:id/confirm` | Confirme une inscription pending |
+| POST | `/api/club/registrations/:id/reject` | Refuse une inscription pending |
+| GET / PUT / DELETE | `/api/club/point-scheme` | Barème de points du club (linear / fixed / proportional) |
+
+### Super-admin (`/api/admin/*`, JWT avec role superadmin)
+
+| Méthode | Chemin | Description |
+|---|---|---|
+| GET / POST / GET `:id` / PATCH / DELETE | `/api/admin/clubs` | CRUD clubs |
+| POST | `/api/admin/clubs/:id/suspend` (et unsuspend) | État club |
+| GET | `/api/admin/clubs/:id/members` | Visibilité super-admin |
+| GET / POST / POST `:id/revoke` | `/api/admin/licenses` | Licenses cross-clubs |
+| GET | `/api/admin/audit` | Audit log cross-clubs |
+
+### Structures partagées (Phase 0.C)
+
+`/api/structures` (JWT scope club). CRUD modèles de tournoi partagés entre PCs du même club.
+
+## Flow auth desktop
 
 ```
 App WPF             pokclock-api              Worker Cloudflare
@@ -51,14 +116,36 @@ App WPF             pokclock-api              Worker Cloudflare
   │                      │  POST /verify           │
   │                      ├────────────────────────►│
   │                      │ ◄───────────────────────┤
-  │                      │ { valid, tier, exp }    │
-  │                      │                         │
+  │                      │ { valid, tier, role,    │
+  │                      │   clubId }              │
   │                      │ Sign RS256 JWT          │
   │ ◄────────────────────┤                         │
   │ { jwt, refreshToken }│                         │
 ```
 
-Le `workerToken` est obligatoire côté Worker : c'est le HMAC issu de `/activate`, persisté dans `license.json` côté app WPF.
+## Flow auth joueur (magic link)
+
+```
+Browser             pokclock-react        pokclock-api          Resend
+  │                       │                    │                  │
+  │ POST /joueurs/login   │                    │                  │
+  ├─────────────────────► │                    │                  │
+  │                       │ POST magic-link    │                  │
+  │                       ├──────────────────► │                  │
+  │                       │                    │ Send email       │
+  │                       │                    ├────────────────► │
+  │                       │ ◄────────────────  │ 202 Accepted     │
+  │                       │                    │                  │
+  │ User clicks email link → GET /api/players/auth/magic-link/verify?token=…
+  │                                            │
+  │                                            │ DELETE+UPDATE token used_at
+  │                                            │ UPSERT players row
+  │                                            │ Issue JWT (audience pokclock-player)
+  │                                            │ Set-Cookie pokclock_player
+  │                                            │   Domain=.pokclock.com SameSite=None Secure
+  │ ◄────────────────────────────────────────  │ 302 → /joueurs/dashboard
+  │                                            │
+```
 
 ## Variables d'environnement
 
@@ -68,27 +155,40 @@ Le `workerToken` est obligatoire côté Worker : c'est le HMAC issu de `/activat
 | `JWT_PRIVATE_KEY_PATH` | oui | Chemin vers la clé privée RSA (en prod : `/run/secrets/jwt_private`) |
 | `JWT_PUBLIC_KEY_PATH` | oui | Chemin vers la clé publique RSA |
 | `WORKER_VERIFY_URL` | oui | URL du Worker Cloudflare `/verify` |
+| `WORKER_ADMIN_URL` | non | URL du Worker pour propagation licenses ops |
+| `WORKER_ADMIN_TOKEN_FILE` | non | Path d'un secret Swarm contenant le Bearer ADMIN_TOKEN |
+| `RESEND_API_KEY_FILE` | non | Path d'un secret Swarm contenant la clé Resend (sinon `RESEND_API_KEY` direct) |
+| `EMAIL_FROM` | non | Sender Resend, défaut `PokClock <noreply@pokclock.com>` |
+| `PUBLIC_SITE_URL` | non | URL frontend, défaut `https://pokclock.com` (utilisé pour les redirects post-magic-link) |
+| `API_BASE_URL` | non | URL self, défaut `https://api.pokclock.com` (utilisé pour les liens dans les emails magic link) |
+| `PLAYER_COOKIE_DOMAIN` | non | Domaine du cookie de session joueur. En prod `.pokclock.com` pour cross-subdomain (`pokclock.com` ↔ `api.pokclock.com`). Vide en dev. |
+| `ALLOWED_ORIGINS` | non | CSV pour CORS (`Allow-Credentials: true` est toujours appliqué pour le cookie joueur) |
+| `SUPERADMIN_LICENSE_KEYS` | non | CSV de bootstrap pour Phase 0.B (à retirer une fois le Worker /verify expose `role`) |
 | `PORT` | non | Défaut 8080 |
 | `LOG_LEVEL` | non | `debug`, `info` (défaut), `warn`, `error` |
-| `ALLOWED_ORIGINS` | non | CSV pour CORS (défaut : aucune origine) |
 
 ## Structure du projet
 
 ```
 pokclock-api/
 ├── cmd/api/main.go          # Entry point
+├── cmd/issue-jwt/main.go    # CLI bootstrap : émet un JWT superadmin local
 ├── internal/
-│   ├── api/                  # Handlers HTTP, router, middleware
-│   ├── domain/
-│   │   ├── auth/             # JWT signing, claims, Worker client
-│   │   └── structures/       # Logique métier structures
-│   └── db/                   # Pool pgx, migrations runtime
-├── migrations/               # SQL goose (001_*.sql, 002_*.sql, …)
-├── .github/workflows/        # CI + deploy
+│   ├── api/                  # Handlers HTTP, router, middleware (jwt desktop + cookie joueur)
+│   ├── clients/
+│   │   ├── resend/           # Client HTTP Resend pour les emails
+│   │   └── workeradmin/      # Client HTTP du Worker /admin (propagation licenses)
+│   ├── domain/auth/          # JWT signing (desktop + player), claims, Worker client
+│   └── db/migrations/        # 001-018, runtime goose au démarrage
 ├── Dockerfile                # Multi-stage (alpine final)
 ├── docker-compose.swarm.prod.yml
 └── Makefile
 ```
+
+Tables Postgres au 2026-05-27 :
+`structures`, `structures_audit`, `clubs`, `licenses`, `members`,
+`published_tournaments`, `tournament_registrations`, `point_schemes`,
+`players`, `player_magic_links`, `tournament_results`.
 
 ## Tests
 
@@ -104,9 +204,10 @@ Déploiement automatique sur push `main` via `.github/workflows/deploy.yml` :
 2. Build image, push GHCR
 3. SSH VPS, `docker stack deploy --with-registry-auth -c docker-compose.swarm.prod.yml pokclock-api`
 
-Rollback : `docker service update --rollback pokclock-api_api`.
+Migrations goose appliquées au démarrage du container. Rollback : `docker service update --rollback pokclock-api_api`.
 
 ## Voir aussi
 
 - [PHASE-0A-PROGRESS.md](../PHASE-0A-PROGRESS.md) — kanban Sprint 0
+- [PHASE-0B-OPS-ROADMAP.md](../PHASE-0B-OPS-ROADMAP.md) — bilan Phases 0.B / 0.C / 0.D / 0.E
 - `pokclock-infra/` — Traefik + monitoring (repo séparé)
