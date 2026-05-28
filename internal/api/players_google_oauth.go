@@ -166,6 +166,9 @@ func (h *playersGoogleOAuthHandler) callback(c echo.Context) error {
 		return c.Redirect(http.StatusFound, h.publicSiteURL+"/fr/joueurs/login?error=issue_failed")
 	}
 
+	// Phase 0.H : auto-link aux clubs où le joueur est déjà connu via local_players.
+	go autoLinkPlayerToClubs(context.Background(), h.pool, h.logger, playerID, userInfo.Email)
+
 	h.setPlayerSessionCookie(c, jwt)
 	return c.Redirect(http.StatusFound, h.publicSiteURL+"/fr/joueurs/dashboard")
 }

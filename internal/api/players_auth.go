@@ -171,6 +171,9 @@ func (h *playersAuthHandler) verifyMagicLink(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "issue_failed"})
 	}
 
+	// Phase 0.H : auto-link aux clubs où le joueur est déjà connu via local_players.
+	go autoLinkPlayerToClubs(context.Background(), h.pool, h.logger, playerID, email)
+
 	h.setPlayerCookie(c, jwt)
 
 	// L'email envoie le user directement sur cet endpoint d'API. On le redirige
