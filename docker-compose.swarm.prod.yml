@@ -40,6 +40,11 @@ services:
       EMAIL_FROM: "PokClock <noreply@pokclock.com>"
       PUBLIC_SITE_URL: "https://pokclock.com"
       ALLOWED_ORIGINS: "https://pokclock.com,https://www.pokclock.com"
+      # Phase 0.E.1 : cookie de session joueur valide pour tout *.pokclock.com.
+      # Sans ça, l'API pose le cookie sur api.pokclock.com seulement,
+      # le site pokclock.com ne le voit jamais -> magic link ne connecte rien.
+      PLAYER_COOKIE_DOMAIN: ".pokclock.com"
+      API_BASE_URL: "https://api.pokclock.com"
     secrets:
       - pg_password_pokclock
       - jwt_private_pokclock
