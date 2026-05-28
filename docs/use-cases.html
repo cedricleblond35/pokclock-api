@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cas d'usage — PokClock</title>
+<meta name="description" content="Cas d'usage par acteur : super-admin, club admin, dealer, joueur anonyme, joueur authentifié. User journeys et écrans clés.">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
+</head>
+<body>
+
+<div class="layout">
+
+<aside>
+  <a href="docs.html" class="brand">pokclock-api
+    <small>Documentation</small>
+  </a>
+
+  <nav>
+    <ol>
+      <li><a href="docs.html">Accueil</a></li>
+      <li><a href="index.html">Référence technique principale</a></li>
+      <li><a href="architecture.html">Architecture &amp; diagrammes</a></li>
+      <li class="active"><a href="use-cases.html">Cas d'usage par acteur</a></li>
+      <li><a href="database-schema.html">Schéma base de données</a></li>
+      <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.G</a></li>
+    </ol>
+  </nav>
+
+  <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);">
+    <p style="font-size:0.75rem;color:var(--fg-muted);text-transform:uppercase;letter-spacing:0.05em;margin:0 0 0.5rem;">Acteurs</p>
+    <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;line-height:1.7;">
+      <li><a href="#actor-superadmin">🔐 Super-admin (Cédric)</a></li>
+      <li><a href="#actor-clubadmin">🃏 Admin de club</a></li>
+      <li><a href="#actor-dealer">🎲 Dealer / croupier</a></li>
+      <li><a href="#actor-anon">👤 Visiteur anonyme</a></li>
+      <li><a href="#actor-player">⭐ Joueur authentifié</a></li>
+    </ul>
+  </div>
+</aside>
+
+<main id="top">
+
+<div class="banner">
+  <h1>Cas d'usage par acteur</h1>
+  <p>Qui fait quoi sur PokClock : 5 acteurs, leurs objectifs, leurs écrans, et les routes API impliquées.</p>
+</div>
+
+<!-- ============================================================
+     VUE D'ENSEMBLE ACTEURS
+============================================================ -->
+<section id="overview">
+<h2>Vue d'ensemble — 5 acteurs</h2>
+
+<div class="mermaid">
+flowchart LR
+  SA([🔐 Super-admin<br/>Cédric])
+  CA([🃏 Admin de club<br/>TD propriétaire])
+  D([🎲 Dealer<br/>croupier])
+  V([👤 Visiteur<br/>anonyme])
+  P([⭐ Joueur<br/>authentifié])
+
+  SA -- "ops.pokclock.com<br/>CF Access + JWT superadmin" --> Ops["Ops dashboard"]
+  CA -- "WPF desktop<br/>+ web /joueurs si compte" --> WPF["App PokClock + web"]
+  D -- "WPF dealer mode<br/>PWA tablette" --> Dealer["WPF + PWA dealer"]
+  V -- "pokclock.com" --> Public["Site public"]
+  P -- "pokclock.com/joueurs" --> Dashboard["Dashboard joueur"]
+
+  Ops --> API
+  WPF --> API
+  Dealer -.-> API
+  Public --> API
+  Dashboard --> API
+
+  API["api.pokclock.com"]
+
+  classDef actor fill:#1f6feb,stroke:#58a6ff,color:#fff
+  classDef ui fill:#3fb950,stroke:#2ea043,color:#000
+  class SA,CA,D,V,P actor
+  class Ops,WPF,Dealer,Public,Dashboard ui
+</div>
+
+<h3>Matrice acteurs × surfaces</h3>
+<table>
+  <thead><tr><th>Acteur</th><th>Surface</th><th>Auth</th><th>Périmètre</th></tr></thead>
+  <tbody>
+    <tr><td>Super-admin (Cédric)</td><td>ops.pokclock.com</td><td>CF Access (Google + PIN) + JWT role=superadmin</td><td>Cross-clubs, observabilité, licenses, audit</td></tr>
+    <tr><td>Admin de club</td><td>App PokClock WPF (Windows) + optionnellement pokclock.com/joueurs si compte</td><td>License key activation desktop / magic link pour le compte joueur</td><td>Son seul club</td></tr>
+    <tr><td>Dealer</td><td>WPF en mode dealer + PWA dealer sur tablette (LAN local)</td><td>License member (sous-rôle WPF)</td><td>Tournois actifs uniquement</td></tr>
+    <tr><td>Visiteur anonyme</td><td>pokclock.com/clubs/[slug]/*</td><td>Aucune</td><td>Lecture publique + inscription par email + magic link annulation</td></tr>
+    <tr><td>Joueur authentifié</td><td>pokclock.com/joueurs/*</td><td>Cookie JWT magic link OU Google OAuth</td><td>Son profil, ses inscriptions, ses clubs, son agenda Google</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     SUPER-ADMIN
+============================================================ -->
+<section id="actor-superadmin">
+<h2>🔐 Super-admin (Cédric)</h2>
+<p>Accède à <code>ops.pokclock.com</code>. Vue cross-clubs : créer/suspendre des clubs, émettre des licenses, auditer toutes les actions sur structures.</p>
+
+<div class="mermaid">
+flowchart LR
+  SA([Super-admin])
+
+  subgraph Clubs ["Gestion clubs"]
+    UC1[Créer un club]
+    UC2[Suspendre / réactiver]
+    UC3[Soft-delete un club]
+    UC4[Lister les membres d'un club]
+  end
+
+  subgraph Lic ["Gestion licenses"]
+    UC5[Émettre une license<br/>POK-XXXX-XXXX-XXXX-XXXX]
+    UC6[Révoquer une license]
+    UC7[Lister licenses cross-clubs]
+  end
+
+  subgraph Audit ["Observabilité"]
+    UC8[Rechercher dans l'audit log<br/>par actor / action / date]
+    UC9[Suivre métriques infra<br/>Grafana (Phase 5a)]
+  end
+
+  SA --> UC1 & UC2 & UC3 & UC4
+  SA --> UC5 & UC6 & UC7
+  SA --> UC8 & UC9
+
+  classDef sa fill:#1f6feb,stroke:#58a6ff,color:#fff
+  classDef uc fill:#161b22,stroke:#30363d,color:#c9d1d9
+  class SA sa
+  class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9 uc
+</div>
+
+<h3>Routes API utilisées</h3>
+<table>
+  <thead><tr><th>UC</th><th>Endpoint</th></tr></thead>
+  <tbody>
+    <tr><td>Lister clubs</td><td><code>GET /api/admin/clubs</code></td></tr>
+    <tr><td>Créer un club</td><td><code>POST /api/admin/clubs</code></td></tr>
+    <tr><td>Suspendre / réactiver</td><td><code>POST /api/admin/clubs/:id/suspend</code> · <code>/unsuspend</code></td></tr>
+    <tr><td>Voir membres d'un club</td><td><code>GET /api/admin/clubs/:id/members</code></td></tr>
+    <tr><td>Lister licenses cross-clubs</td><td><code>GET /api/admin/licenses?clubId=...&status=...</code></td></tr>
+    <tr><td>Émettre une license</td><td><code>POST /api/admin/licenses</code></td></tr>
+    <tr><td>Révoquer une license</td><td><code>POST /api/admin/licenses/:id/revoke</code></td></tr>
+    <tr><td>Audit cross-clubs</td><td><code>GET /api/admin/audit?clubId=&amp;actor=&amp;from=&amp;to=</code></td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     CLUB ADMIN
+============================================================ -->
+<section id="actor-clubadmin">
+<h2>🃏 Admin de club</h2>
+<p>L'admin du club (typiquement le TD propriétaire) gère son club depuis l'app desktop <strong>PokClock WPF</strong>. Onglet "Mon club" centralise : info, membres staff, licenses, inscriptions, audit, barème de points, membres joueurs, saisons.</p>
+
+<div class="mermaid">
+flowchart TB
+  CA([Admin de club])
+
+  subgraph Setup ["Setup club"]
+    UC1[Voir info du club + statut]
+    UC2[Toggle inscriptions online]
+    UC3[Gérer membres staff]
+    UC4[Générer licenses pour son équipe]
+    UC5[Assigner license ↔ membre]
+  end
+
+  subgraph Configs ["Configuration métier"]
+    UC6[Configurer barème de points<br/>linear / fixed / proportional / custom]
+    UC7[Créer une saison de championnat]
+    UC8[Publier une structure de tournoi partagée]
+  end
+
+  subgraph Tour ["Cycle tournoi"]
+    UC9[Créer un tournoi local<br/>(blinds, buy-in, joueurs)]
+    UC10[Publier en ligne<br/>(audience, display mode, saison)]
+    UC11[Modérer les inscriptions<br/>(confirm / reject)]
+    UC12[Approuver les demandes<br/>d'adhésion au club]
+    UC13[Publier le classement final<br/>+ calcul points auto]
+  end
+
+  subgraph Mob ["Pendant le tournoi"]
+    UC14[Lancer l'horloge + audio]
+    UC15[Gérer les tables<br/>équilibrage + HFH]
+    UC16[Enregistrer les éliminations]
+    UC17[Lancer la PWA dealer<br/>(LAN local)]
+  end
+
+  CA --> UC1 & UC2 & UC3 & UC4 & UC5
+  CA --> UC6 & UC7 & UC8
+  CA --> UC9 & UC10 & UC11 & UC12 & UC13
+  CA --> UC14 & UC15 & UC16 & UC17
+
+  classDef ca fill:#d29922,stroke:#bf8700,color:#000
+  classDef uc fill:#161b22,stroke:#30363d,color:#c9d1d9
+  class CA ca
+  class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9,UC10,UC11,UC12,UC13,UC14,UC15,UC16,UC17 uc
+</div>
+
+<h3>Onglets WPF "Mon club"</h3>
+<table>
+  <thead><tr><th>Onglet</th><th>Contenu</th><th>Endpoints</th></tr></thead>
+  <tbody>
+    <tr><td>INFO</td><td>Nom, plan, statut, email, notes + bouton inscriptions online + barème de points</td><td><code>GET /api/club/info</code> · <code>/point-scheme</code></td></tr>
+    <tr><td>MEMBRES</td><td>Staff du club (croupiers, dealers, admins)</td><td><code>GET/POST/PATCH/DELETE /api/club/members</code></td></tr>
+    <tr><td>LICENSES</td><td>Licenses générées pour le club</td><td><code>GET/POST /api/club/licenses</code></td></tr>
+    <tr><td>INSCRIPTIONS</td><td>Modération des inscriptions online aux tournois (sidebar gauche = tournois pending, droite = liste joueurs)</td><td><code>GET /api/club/tournaments</code> · <code>/registrations</code></td></tr>
+    <tr><td>AUDIT</td><td>Audit log des actions sur les structures du club</td><td><code>GET /api/club/audit</code></td></tr>
+    <tr><td>MEMBRES JOUEURS</td><td>Adhésions de comptes joueurs au club (Phase 0.F)</td><td><code>GET /api/club/memberships</code></td></tr>
+    <tr><td>SAISONS</td><td>Championnats / saisons (Phase 0.G)</td><td><code>GET/POST /api/club/seasons</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Flow publication d'un tournoi</h3>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant CA as Admin TD<br/>(WPF)
+  participant DLG as PublishSettingsDialog
+  participant API as pokclock-api
+  participant DB as Postgres
+
+  CA->>CA: Sélectionne un tournoi local<br/>configure blinds, buy-in, joueurs
+  CA->>CA: Click "Publier en ligne"
+  CA->>API: GET /api/club/seasons (charge saisons)
+  CA->>API: GET /api/club/tournaments (existing?)
+  CA->>DLG: Ouvre dialog avec settings actuels
+  Note over DLG: Checkbox afficher joueurs<br/>radio mode (pseudo/initiale/full)<br/>Checkbox members_only<br/>ComboBox saison
+  CA->>DLG: Configure + Publier
+  DLG-->>CA: settings + audience + seasonId
+  CA->>CA: BuildPublishRequest<br/>(+ prizeStructure via PrizeStructureBuilder)
+  CA->>API: POST /api/club/tournaments
+  API->>DB: UPSERT par (club_id, local_tournament_id)<br/>UNIQUE partial WHERE status != cancelled
+  DB-->>API: row (201 si insert, 200 si update)
+  API-->>CA: PublishedTournament JSON
+  CA->>CA: Affiche URL publique + bouton "Ouvrir"
+</div>
+</section>
+
+<!-- ============================================================
+     DEALER
+============================================================ -->
+<section id="actor-dealer">
+<h2>🎲 Dealer / croupier</h2>
+<p>Le dealer utilise un sous-mode de WPF (license <code>role=member</code>) sur son poste, ou la <strong>PWA dealer</strong> sur tablette connectée au LAN local du club. Il enregistre les éliminations, demande des resits, déclenche le hand-for-hand.</p>
+
+<div class="mermaid">
+flowchart LR
+  D([Dealer])
+
+  subgraph Live ["Pendant le tournoi"]
+    UC1[Démarrer / pauser l'horloge]
+    UC2[Avancer / reculer un niveau]
+    UC3[Enregistrer une élimination]
+    UC4[Demander Hand-for-Hand]
+    UC5[Lancer un Rebuy / Add-on]
+    UC6[Marquer un break]
+  end
+
+  D --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6
+
+  classDef d fill:#3fb950,stroke:#2ea043,color:#000
+  classDef uc fill:#161b22,stroke:#30363d,color:#c9d1d9
+  class D d
+  class UC1,UC2,UC3,UC4,UC5,UC6 uc
+</div>
+
+<p>
+La PWA dealer est servie par le Kestrel embarqué de WPF (port 5050) en LAN uniquement. SignalR temps réel pousse les états (timer, blinds, joueurs restants) sur toutes les tablettes connectées. Pas d'appel à <code>api.pokclock.com</code> depuis le dealer — tout reste local au club.
+</p>
+</section>
+
+<!-- ============================================================
+     VISITEUR ANONYME
+============================================================ -->
+<section id="actor-anon">
+<h2>👤 Visiteur anonyme (site public)</h2>
+<p>Quelqu'un qui découvre PokClock via <code>pokclock.com</code>. Peut consulter les pages marketing et les tournois publiés d'un club, s'inscrire sans créer de compte.</p>
+
+<div class="mermaid">
+flowchart LR
+  V([Visiteur anonyme])
+
+  subgraph Marketing ["Marketing"]
+    UC1[Découvrir le produit<br/>features / pricing / témoignages]
+    UC2[Voir les tarifs]
+    UC3[Télécharger l'app desktop<br/>(Setup.exe Velopack)]
+  end
+
+  subgraph Clubs ["Pages clubs"]
+    UC4[Voir les tournois publiés<br/>d'un club /clubs/slug/tournois]
+    UC5[Détail d'un tournoi]
+    UC6[Voir le classement du club<br/>cumul cross-tournois]
+    UC7[Voir les saisons / championnats]
+    UC8[Voir le leaderboard d'une saison]
+  end
+
+  subgraph Reg ["Inscription anonyme"]
+    UC9[S'inscrire via formulaire<br/>prénom/nom/email/phone]
+    UC10[Annuler via magic link email]
+  end
+
+  V --> UC1 & UC2 & UC3
+  V --> UC4 & UC5 & UC6 & UC7 & UC8
+  V --> UC9 & UC10
+
+  classDef v fill:#7c3aed,stroke:#a78bfa,color:#fff
+  classDef uc fill:#161b22,stroke:#30363d,color:#c9d1d9
+  class V v
+  class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9,UC10 uc
+</div>
+
+<h3>Limites du flow anonyme</h3>
+<ul>
+  <li>❌ Refusé sur tournois <code>audience = members_only</code> (CTA "Me connecter" affichée)</li>
+  <li>❌ Pas d'historique persistant — chaque inscription doit ressaisir les infos</li>
+  <li>❌ Pas d'agenda Google sync</li>
+  <li>✅ Email magic link pour annuler son inscription à tout moment</li>
+</ul>
+</section>
+
+<!-- ============================================================
+     JOUEUR AUTHENTIFIÉ
+============================================================ -->
+<section id="actor-player">
+<h2>⭐ Joueur authentifié</h2>
+<p>Le joueur crée un compte via magic link email ou Google OAuth. Cookie JWT 30j sur <code>Domain=.pokclock.com</code>. Dashboard centralise profil, inscriptions, clubs, agenda.</p>
+
+<div class="mermaid">
+flowchart TB
+  P([Joueur authentifié])
+
+  subgraph Compte ["Gestion compte"]
+    UC1[Se connecter via magic link]
+    UC2[Se connecter via Google OAuth]
+    UC3[Voir / éditer son profil]
+    UC4[Supprimer son compte<br/>(RGPD avec anonymisation)]
+    UC5[Se déconnecter]
+  end
+
+  subgraph Insc ["Inscriptions tournois"]
+    UC6[S'inscrire en un clic<br/>(profil préfilléprefilled)]
+    UC7[Voir ses inscriptions à venir]
+    UC8[Voir son historique]
+    UC9[Annuler une inscription]
+  end
+
+  subgraph Clubs ["Adhésions clubs (Phase 0.F)"]
+    UC10[Demander adhésion à un club]
+    UC11[Voir ses clubs + statut]
+    UC12[Quitter un club]
+  end
+
+  subgraph Cal ["Sync agenda (Phase 0.E.5)"]
+    UC13[Connecter Google Calendar]
+    UC14[Events auto à l'inscription]
+    UC15[Déconnecter l'agenda]
+  end
+
+  P --> UC1 & UC2 & UC3 & UC4 & UC5
+  P --> UC6 & UC7 & UC8 & UC9
+  P --> UC10 & UC11 & UC12
+  P --> UC13 & UC14 & UC15
+
+  classDef p fill:#d29922,stroke:#bf8700,color:#000
+  classDef uc fill:#161b22,stroke:#30363d,color:#c9d1d9
+  class P p
+  class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9,UC10,UC11,UC12,UC13,UC14,UC15 uc
+</div>
+
+<h3>User journey — du visiteur au membre fidèle</h3>
+
+<div class="mermaid">
+journey
+    title Conversion visiteur → joueur → membre actif
+    section Découverte
+      Visite pokclock.com depuis Google: 5: Visiteur
+      Clique sur le club via URL d'un copain: 5: Visiteur
+      Voit un tournoi sympa: 4: Visiteur
+    section 1ère inscription
+      Saisit prénom/nom/email/phone: 3: Visiteur
+      Reçoit email confirmation: 5: Visiteur
+      Confirme avec validation admin: 5: Visiteur
+    section Création compte
+      Décide de créer un compte joueur: 5: Visiteur
+      Magic link OU Google login: 5: Joueur
+      Atterrit sur dashboard: 5: Joueur
+    section Inscription un clic
+      Voit tournoi, clic S'inscrire: 5: Joueur
+      Profil préfilléprefilled, validation admin: 5: Joueur
+    section Adhésion club
+      Joue plusieurs tournois publics: 4: Joueur
+      Demande l'adhésion au club: 4: Joueur
+      Admin approuve, accède aux tournois members-only: 5: Membre
+      Sync Calendar pour ne rien rater: 5: Membre
+    section Championnat
+      Joue les tournois de la saison: 5: Membre
+      Suit sa progression dans le leaderboard: 5: Membre
+</div>
+
+<h3>Routes API utilisées (côté joueur)</h3>
+<table>
+  <thead><tr><th>UC</th><th>Endpoint</th></tr></thead>
+  <tbody>
+    <tr><td>Magic link login</td><td><code>POST /api/players/auth/magic-link</code> · <code>GET .../verify</code></td></tr>
+    <tr><td>Google login</td><td><code>GET /api/players/auth/google/start</code> · <code>/callback</code></td></tr>
+    <tr><td>Profil</td><td><code>GET/PATCH/DELETE /api/players/me</code></td></tr>
+    <tr><td>Inscription one-click</td><td><code>POST /api/players/me/clubs/:slug/tournaments/:id/register</code></td></tr>
+    <tr><td>Mes inscriptions</td><td><code>GET /api/players/me/registrations</code></td></tr>
+    <tr><td>Annuler</td><td><code>DELETE /api/players/me/registrations/:id</code></td></tr>
+    <tr><td>Adhésions</td><td><code>GET / POST :slug/join / DELETE :slug /api/players/me/clubs</code></td></tr>
+    <tr><td>Calendar</td><td><code>GET/DELETE /api/players/me/google-calendar</code> · <code>/start</code> · <code>/callback</code></td></tr>
+    <tr><td>Logout</td><td><code>POST /api/players/auth/logout</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Données effacées au DELETE /me (RGPD)</h3>
+<p>Voir <a href="players-data-storage.html#section-7-droit-%C3%A0-l-effacement-rgpd-art-17">PLAYERS_DATA_STORAGE § 7</a> pour le détail.</p>
+</section>
+
+<footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
+  <p>PokClock · Cas d'usage par acteur · Cross-ref : <a href="architecture.html">Architecture</a> · <a href="database-schema.html">Schéma DB</a></p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#0f1419',
+      primaryColor: '#1f6feb',
+      primaryTextColor: '#c9d1d9',
+      primaryBorderColor: '#58a6ff',
+      lineColor: '#8b949e',
+      secondaryColor: '#3fb950',
+      tertiaryColor: '#d29922',
+    },
+    flowchart: { curve: 'basis', padding: 20 },
+    sequence: { actorMargin: 50, boxMargin: 10 },
+  });
+</script>
+</body>
+</html>

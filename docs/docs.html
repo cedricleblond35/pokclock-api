@@ -16,30 +16,62 @@
     <ol>
       <li class="active"><a href="docs.html">Accueil</a></li>
       <li><a href="index.html">Référence technique principale</a></li>
+      <li><a href="architecture.html">Architecture &amp; diagrammes</a></li>
+      <li><a href="use-cases.html">Cas d'usage par acteur</a></li>
       <li><a href="database-schema.html">DB Schema</a></li>
-      <li><a href="players-data-storage.html">Joueurs & RGPD</a></li>
-      <li><a href="phase-0b-bilan.html">Phase 0.B</a></li>
+      <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.G</a></li>
     </ol>
   </nav>
 </aside>
 <main id="top">
 <div class="banner">
-  <h1>Documentation pokclock-api</h1>
-  <p>Backend Go/Echo pour PokClock — cloud features, comptes joueurs, tournois publiés, leaderboards, RGPD.</p>
+  <h1>Documentation PokClock</h1>
+  <p>Backend Go/Echo pour PokClock — écosystème cloud, comptes joueurs, tournois publiés, leaderboards, RGPD, sync Calendar, championnats.</p>
   <div class="meta">
-    <span><strong>Repo</strong> cedricleblond35/pokclock-api</span>
+    <span><strong>3 repos</strong> pokclock-api · pokclock-react · StackPilot (WPF)</span>
     <span><strong>Live</strong> <a href="https://api.pokclock.com/api/health">api.pokclock.com</a></span>
+    <span><strong>Phases livrées</strong> 0.A → 0.G</span>
   </div>
+</div>
+
+<h2>Par où commencer</h2>
+<p style="color:var(--fg-muted);">
+Tu débarques sur le projet ? Lis dans l'ordre : <a href="architecture.html">Architecture</a> (vue système globale) → <a href="use-cases.html">Cas d'usage</a> (qui fait quoi) → <a href="database-schema.html">DB Schema</a> (modèle de données détaillé) → <a href="index.html">Référence technique</a> (deep-dive code).
+</p>
+
+<div style="margin-top:1.5rem;padding:1rem;border:1px solid var(--accent);border-radius:var(--radius);background:rgba(88,166,255,0.05);">
+  <p style="margin:0;font-size:0.85rem;">
+    <strong>🤖 Pour les assistants IA</strong> — Les sources Markdown vivent dans <code><a href="../doc-ia/">../doc-ia/</a></code> (séparées du HTML pour optimiser les tokens). Point d'entrée : <a href="../doc-ia/INDEX.md"><code>../doc-ia/INDEX.md</code></a>.
+  </p>
 </div>
 
 <h2>Pages disponibles</h2>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-top:1.5rem;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;margin-top:1.5rem;">
+
+  <a href="architecture.html" style="text-decoration:none;color:inherit;">
+    <div style="border:1px solid var(--accent);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
+      <p style="margin:0;font-size:0.7rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;">⭐ Nouveau</p>
+      <h3 style="margin-top:0.5rem;color:var(--accent);">Architecture &amp; diagrammes</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">12 diagrammes Mermaid : écosystème, infra Swarm, composants par repo, flows d'auth (license desktop / magic link / Google OAuth / Calendar), lifecycle inscription, UML entités, états.</p>
+      <p style="font-size:0.8rem;color:var(--fg-dim);">📄 architecture.html</p>
+    </div>
+  </a>
+
+  <a href="use-cases.html" style="text-decoration:none;color:inherit;">
+    <div style="border:1px solid var(--accent);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
+      <p style="margin:0;font-size:0.7rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;">⭐ Nouveau</p>
+      <h3 style="margin-top:0.5rem;color:var(--accent);">Cas d'usage par acteur</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">5 acteurs (super-admin, admin de club, dealer, visiteur, joueur), leurs UC, écrans, et routes API. Inclut un user journey de la découverte à l'adhésion.</p>
+      <p style="font-size:0.8rem;color:var(--fg-dim);">📄 use-cases.html</p>
+    </div>
+  </a>
 
   <a href="index.html" style="text-decoration:none;color:inherit;">
-    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);transition:border-color 0.15s;">
+    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
       <h3 style="margin-top:0;color:var(--accent);">Référence technique principale</h3>
-      <p style="color:var(--fg-muted);font-size:0.9rem;">Vue d'ensemble, architecture, cas d'usage, stack, sécurité, roadmap. Le doc historique avec sommaire et diagrammes Mermaid.</p>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Vue d'ensemble, architecture Clean, cas d'usage légacy, stack, sécurité, roadmap. Le doc historique avec sommaire et diagrammes Mermaid.</p>
       <p style="font-size:0.8rem;color:var(--fg-dim);">📄 index.html</p>
     </div>
   </a>
@@ -51,17 +83,19 @@
       <p style="font-size:0.8rem;color:var(--fg-dim);">📄 database-schema.html</p>
     </div>
   </a>
+
   <a href="players-data-storage.html" style="text-decoration:none;color:inherit;">
     <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
       <h3 style="margin-top:0;color:var(--accent);">Stockage des données joueurs</h3>
-      <p style="color:var(--fg-muted);font-size:0.9rem;">Où vivent les données des comptes joueurs (Postgres, cookie, backups R2, Resend) et conformité RGPD.</p>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Où vivent les données des comptes joueurs (Postgres, cookie, backups R2, Resend) et conformité RGPD avec le DELETE /me d'anonymisation.</p>
       <p style="font-size:0.8rem;color:var(--fg-dim);">📄 players-data-storage.html</p>
     </div>
   </a>
+
   <a href="phase-0b-bilan.html" style="text-decoration:none;color:inherit;">
     <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
-      <h3 style="margin-top:0;color:var(--accent);">Phase 0.B — Bilan ops dashboard</h3>
-      <p style="color:var(--fg-muted);font-size:0.9rem;">Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G livrées en mai 2026.</p>
+      <h3 style="margin-top:0;color:var(--accent);">Phase 0.B → 0.G — Bilans</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Roadmap et bilans cumulés des phases 0.B (ops) / 0.C (members) / 0.D (tournois) / 0.E (joueurs) / 0.F (adhésions) / 0.G (saisons) livrées en mai 2026.</p>
       <p style="font-size:0.8rem;color:var(--fg-dim);">📄 phase-0b-bilan.html</p>
     </div>
   </a>
@@ -72,12 +106,24 @@
 <ul>
   <li><a href="https://api.pokclock.com/api/health">Healthcheck API live</a></li>
   <li><a href="https://api.pokclock.com/.well-known/jwks.json">JWKS public (clé de signature JWT)</a></li>
-  <li><a href="https://github.com/cedricleblond35/pokclock-api">Code source sur GitHub</a></li>
   <li><a href="https://pokclock.com">Site public PokClock</a></li>
+  <li><a href="https://github.com/cedricleblond35/pokclock-api">Repo backend (Go)</a></li>
+  <li><a href="https://github.com/cedricleblond35/pokclock-react">Repo frontend (Next.js)</a></li>
+  <li><a href="https://github.com/cedricleblond35/PokClock">Repo desktop (WPF C#)</a></li>
 </ul>
 
+<h2 style="margin-top:3rem;">Repos &amp; ownership</h2>
+<table>
+  <thead><tr><th>Repo</th><th>Stack</th><th>Hostname</th><th>Statut docs</th></tr></thead>
+  <tbody>
+    <tr><td><code>pokclock-api</code></td><td>Go 1.24 / Echo / pgx</td><td>api.pokclock.com</td><td>Cette doc (référence + diagrammes)</td></tr>
+    <tr><td><code>pokclock-react</code></td><td>Next.js 14 App Router</td><td>pokclock.com</td><td>README + commits parlent d'eux-mêmes</td></tr>
+    <tr><td><code>StackPilot</code> (alias PokClock)</td><td>WPF .NET 8 / EF Core</td><td>app desktop Windows</td><td>CLAUDE.md, ROADMAP.md, CLOUD_EVOLUTIONS_ROADMAP.md, EVOLUTIONS.md dans le repo</td></tr>
+  </tbody>
+</table>
+
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
-  <p>pokclock-api · 2026-05-28</p>
+  <p>pokclock-api · documentation maintenue manuellement · 2026-05-28</p>
 </footer>
 </main>
 </div>

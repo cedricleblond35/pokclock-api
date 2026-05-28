@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture — PokClock</title>
+<meta name="description" content="Architecture technique complète : 3 repos, Cloudflare, Worker license, Postgres, Resend, Google OAuth, R2 backups. Diagrammes système, séquences auth, lifecycle inscription.">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+
+<div class="layout">
+
+<aside>
+  <a href="docs.html" class="brand">pokclock-api
+    <small>Documentation</small>
+  </a>
+
+  <nav>
+    <ol>
+      <li><a href="docs.html">Accueil</a></li>
+      <li><a href="index.html">Référence technique principale</a></li>
+      <li class="active"><a href="architecture.html">Architecture &amp; diagrammes</a></li>
+      <li><a href="use-cases.html">Cas d'usage par acteur</a></li>
+      <li><a href="database-schema.html">Schéma base de données</a></li>
+      <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.G</a></li>
+    </ol>
+  </nav>
+
+  <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);">
+    <p style="font-size:0.75rem;color:var(--fg-muted);text-transform:uppercase;letter-spacing:0.05em;margin:0 0 0.5rem;">Sections</p>
+    <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;line-height:1.7;">
+      <li><a href="#ecosystem">1. Écosystème global</a></li>
+      <li><a href="#deployment">2. Déploiement infra</a></li>
+      <li><a href="#components">3. Composants par repo</a></li>
+      <li><a href="#auth-desktop">4. Auth license desktop</a></li>
+      <li><a href="#auth-player-magic">5. Auth joueur magic link</a></li>
+      <li><a href="#auth-player-google">6. Auth joueur Google</a></li>
+      <li><a href="#calendar-sync">7. Sync Google Calendar</a></li>
+      <li><a href="#registration-flow">8. Inscription tournoi</a></li>
+      <li><a href="#results-flow">9. Publication résultats</a></li>
+      <li><a href="#uml">10. UML entités</a></li>
+      <li><a href="#registration-state">11. États inscription</a></li>
+      <li><a href="#membership-state">12. États adhésion</a></li>
+    </ul>
+  </div>
+</aside>
+
+<main id="top">
+
+<div class="banner">
+  <h1>Architecture &amp; diagrammes système</h1>
+  <p>Vue technique complète de l'écosystème PokClock : 3 repos, services Cloudflare, Postgres VPS, Resend, Google OAuth. Sequence diagrams pour chaque flow d'authentification et de données.</p>
+  <div class="meta">
+    <span><strong>Dernière maj</strong> 2026-05-28</span>
+    <span><strong>Phases couvertes</strong> 0.A → 0.G</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     1. ÉCOSYSTÈME GLOBAL
+============================================================ -->
+<section id="ecosystem">
+<h2>1. Écosystème global</h2>
+<p>
+PokClock est composé de <strong>3 repos applicatifs</strong> et de <strong>5 services externes</strong>. L'application desktop (PokClock WPF) est la source d'autorité métier, le backend Go (<code>pokclock-api</code>) joue le rôle de bus cloud entre l'app, le site public et les comptes joueurs.
+</p>
+
+<div class="mermaid">
+flowchart TB
+  subgraph apps["Applications"]
+    WPF["PokClock WPF<br/>app desktop Windows<br/>Velopack auto-update"]
+    Site["pokclock.com<br/>site marketing + dashboards joueurs<br/>Next.js 14"]
+    Ops["ops.pokclock.com<br/>admin dashboard<br/>Next.js, Cloudflare Access"]
+  end
+
+  subgraph cloud["Backend cloud (VPS OVH)"]
+    API["api.pokclock.com<br/>Go Echo<br/>JWT desktop + cookie joueur"]
+    PG[("Postgres 16<br/>13 tables<br/>service Swarm")]
+    Backup["restic backup<br/>quotidien 03:00 UTC"]
+  end
+
+  subgraph cf["Cloudflare"]
+    Worker["Worker /verify<br/>license HMAC"]
+    D1[("D1 SQLite<br/>licenses + activations")]
+    Access["Cloudflare Access<br/>gates ops.pokclock.com"]
+    R2B["R2 pokclock-backups<br/>WEUR, AES-256"]
+    R2R["R2 pokclock-releases<br/>Velopack Setup.exe"]
+  end
+
+  subgraph ext["Tiers"]
+    Resend["Resend<br/>email transactionnel<br/>noreply@pokclock.com"]
+    Google["Google OAuth<br/>login joueur + Calendar"]
+    GCal["Google Calendar API<br/>events auto à l'inscription"]
+  end
+
+  WPF -- "POST /auth/issue<br/>(licence + hwid)" --> API
+  WPF -- "CRUD structures + tournois + résultats" --> API
+  Site -- "magic link login + register" --> API
+  Site -- "fetch tournois + leaderboard public" --> API
+  Ops -- "admin clubs + licenses + audit" --> API
+
+  API --> PG
+  API -- "POST /verify" --> Worker
+  Worker --> D1
+  Worker -- "Resend confirm activation" --> Resend
+  API -- "Resend magic link + emails" --> Resend
+  API -- "OAuth login + Calendar" --> Google
+  API -- "create/update/delete event" --> GCal
+
+  Site -- "OAuth login redirect" --> Google
+  Google -- "callback" --> API
+
+  Backup -- "pg_dump + chiffrement" --> R2B
+  PG -.-> Backup
+
+  Ops -. "Google OAuth + PIN" .-> Access
+  WPF -. "fetch update delta" .-> R2R
+
+  classDef appCls fill:#1f6feb,stroke:#58a6ff,color:#fff
+  classDef cloudCls fill:#3fb950,stroke:#2ea043,color:#000
+  classDef cfCls fill:#d29922,stroke:#bf8700,color:#000
+  classDef extCls fill:#7c3aed,stroke:#a78bfa,color:#fff
+  class WPF,Site,Ops appCls
+  class API,PG,Backup cloudCls
+  class Worker,D1,Access,R2B,R2R cfCls
+  class Resend,Google,GCal extCls
+</div>
+</section>
+
+<!-- ============================================================
+     2. DÉPLOIEMENT INFRA
+============================================================ -->
+<section id="deployment">
+<h2>2. Déploiement infrastructure</h2>
+<p>
+La VPS OVH <code>vps-eb94174b</code> (54.38.243.50:52999) héberge le backend en Docker Swarm avec 3 services. Cloudflare DNS + cert wildcard <code>*.pokclock.com</code> via DNS-01.
+</p>
+
+<div class="mermaid">
+flowchart LR
+  DNS["Cloudflare DNS<br/>pokclock.com<br/>NS jim/liberty"] --> CF["Cloudflare Edge<br/>HTTPS + cert wildcard"]
+
+  CF --> VPS["VPS OVH vps-eb94174b<br/>54.38.243.50<br/>Docker Swarm"]
+
+  subgraph swarm["Stack pokclock-api"]
+    Traefik["Traefik<br/>reverse proxy<br/>resolver cloudflare-dns"]
+    API1["api 2 replicas"]
+    PG[("postgres<br/>1 replica<br/>volume persistent")]
+    BK["backup<br/>restic + cron"]
+  end
+
+  subgraph swarm2["Stack pokclock-ops"]
+    Ops["ops Next.js<br/>derrière CF Access"]
+  end
+
+  subgraph swarm3["Stack pokclock-react"]
+    Site["site Next.js<br/>marketing + joueurs"]
+  end
+
+  VPS --> Traefik
+  Traefik --> API1
+  Traefik --> Ops
+  Traefik --> Site
+  API1 --> PG
+  BK -. "snapshot daily" .-> R2["Cloudflare R2<br/>pokclock-backups WEUR"]
+  PG -.-> BK
+
+  CF -.-> CFAccess["Cloudflare Access<br/>Zero Trust"]
+  CFAccess -. "Google OAuth + PIN<br/>email drick35@gmail.com" .-> Ops
+
+  classDef cfCls fill:#d29922,stroke:#bf8700,color:#000
+  classDef vpsCls fill:#3fb950,stroke:#2ea043,color:#000
+  classDef extCls fill:#7c3aed,stroke:#a78bfa,color:#fff
+  class DNS,CF,CFAccess,R2 cfCls
+  class VPS,Traefik,API1,PG,BK,Ops,Site vpsCls
+</div>
+
+<h3>Sous-domaines</h3>
+<table>
+  <thead><tr><th>Sous-domaine</th><th>Audience</th><th>Protection</th><th>Rôle</th></tr></thead>
+  <tbody>
+    <tr><td><code>pokclock.com</code></td><td>Public</td><td>Aucune</td><td>Marketing + dashboards joueurs</td></tr>
+    <tr><td><code>api.pokclock.com</code></td><td>Apps + ops</td><td>JWT RS256 (role-based)</td><td>Backend Go</td></tr>
+    <tr><td><code>ops.pokclock.com</code></td><td>Cédric</td><td>CF Access + JWT superadmin</td><td>Admin dashboard</td></tr>
+    <tr><td><code>next.pokclock.com</code></td><td>Cédric</td><td>Aucune</td><td>Staging Next.js</td></tr>
+    <tr><td><code>grafana.pokclock.com</code></td><td>Cédric</td><td>CF Access (planifié)</td><td>Monitoring (Phase 5a backlog)</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     3. COMPOSANTS PAR REPO
+============================================================ -->
+<section id="components">
+<h2>3. Composants par repo</h2>
+
+<div class="mermaid">
+flowchart TB
+  subgraph apirepo["pokclock-api (Go)"]
+    direction LR
+    Router["Router Echo"]
+    AuthMW["Middlewares<br/>JWT desktop + cookie player<br/>RBAC requireRole"]
+    Handlers["Handlers<br/>auth / admin / club / public / players"]
+    Services["Services<br/>calendarSync / cleanup"]
+    Clients["Clients HTTP<br/>resend / workeradmin / googlecal"]
+    Signer["auth.Signer<br/>RS256 + JWKS"]
+  end
+
+  subgraph reactrepo["pokclock-react (Next.js 14)"]
+    direction LR
+    Pages["Pages App Router<br/>marketing + clubs/[slug]/*<br/>joueurs/*"]
+    ServerActions["Server Actions<br/>magic link + register + delete me"]
+    LibAPI["lib/pokclock-api.ts<br/>+ lib/player-auth.ts"]
+    Components["Components React<br/>OneClickRegister + JoinClubButton<br/>DeleteAccountButton + GoogleCalendarPanel"]
+  end
+
+  subgraph wpfrepo["StackPilot WPF (.NET 8)"]
+    direction LR
+    Domain["Domain<br/>entités poker"]
+    AppLayer["Application<br/>services blinds/pko/icm/leaderboard"]
+    Infra["Infrastructure<br/>EF Core SQLite + Velopack + DPAPI"]
+    Pres["Presentation<br/>WPF MVVM CommunityToolkit"]
+    Dialogs["Dialogs<br/>PublishSettings + PublishResults<br/>PointScheme + Season + Member"]
+    PokClockApiClient["PokClockApiClient<br/>HttpClient + JWT renewing handler"]
+  end
+
+  Router --> AuthMW --> Handlers
+  Handlers --> Services
+  Handlers --> Clients
+  Handlers --> Signer
+  Pages --> ServerActions --> LibAPI
+  Pages --> LibAPI
+  Pages --> Components
+  Pres --> Dialogs --> AppLayer
+  Pres --> PokClockApiClient
+  AppLayer --> Domain
+  AppLayer --> Infra
+
+  LibAPI -. "fetch credentials include" .-> Router
+  PokClockApiClient -. "HTTPS + JWT Bearer" .-> Router
+
+  classDef apiCls fill:#1f6feb,stroke:#58a6ff,color:#fff
+  classDef reactCls fill:#3fb950,stroke:#2ea043,color:#000
+  classDef wpfCls fill:#d29922,stroke:#bf8700,color:#000
+  class Router,AuthMW,Handlers,Services,Clients,Signer apiCls
+  class Pages,ServerActions,LibAPI,Components reactCls
+  class Domain,AppLayer,Infra,Pres,Dialogs,PokClockApiClient wpfCls
+</div>
+</section>
+
+<!-- ============================================================
+     4. AUTH LICENSE DESKTOP
+============================================================ -->
+<section id="auth-desktop">
+<h2>4. Auth license desktop (WPF)</h2>
+<p>
+La license <code>POK-XXXX-XXXX-XXXX-XXXX</code> est validée par le Worker Cloudflare (source de vérité), pas par l'API. L'API émet ensuite un JWT RS256 24h utilisé pour les appels suivants.
+</p>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as User Cédric
+  participant WPF as App PokClock WPF
+  participant API as pokclock-api
+  participant W as Worker Cloudflare
+  participant D1 as D1 SQLite
+
+  U->>WPF: Lance l'app, saisit email + licence
+  WPF->>API: POST /api/auth/issue<br/>{ licenseKey, hwid, workerToken }
+  API->>W: POST /verify (forward)
+  W->>D1: SELECT licenses WHERE key = ? AND hwid bound ok
+  D1-->>W: row license
+  W-->>API: { valid: true, tier, role, clubId }
+  API->>API: Signer.Issue(claims) RS256<br/>aud=pokclock-desktop, ttl 24h
+  API-->>WPF: { jwt, refreshToken }
+  WPF->>WPF: Stocke en mémoire + LicenseRegistry
+  WPF->>API: GET /api/structures<br/>Bearer JWT
+  API->>API: jwtAuthMiddleware verify<br/>+ requireClubScope
+  API-->>WPF: structures du club
+
+  Note over WPF,API: Revalidation /4h via LicenseRevalidationLoop<br/>+ verify synchrone au démarrage (timeout 5s)
+</div>
+</section>
+
+<!-- ============================================================
+     5. AUTH JOUEUR MAGIC LINK
+============================================================ -->
+<section id="auth-player-magic">
+<h2>5. Auth joueur magic link</h2>
+<p>
+Le joueur tape son email sur <code>/joueurs/login</code>, reçoit un lien à 15 min de validité, clique → arrive sur son dashboard. JWT joueur en cookie HttpOnly <code>Domain=.pokclock.com</code>.
+</p>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as Joueur
+  participant B as Navigateur
+  participant Site as pokclock.com
+  participant API as api.pokclock.com
+  participant R as Resend
+  participant DB as Postgres
+
+  U->>B: pokclock.com/fr/joueurs/login
+  B->>Site: GET /joueurs/login
+  Site-->>B: form email
+  U->>B: Saisit jean@example.com → submit
+  B->>Site: POST server action sendMagicLinkAction
+  Site->>API: POST /api/players/auth/magic-link<br/>{ email }
+  API->>DB: INSERT player_magic_links<br/>(token 32 bytes b64url, exp +15min)
+  API->>R: Send email "Ton lien de connexion"
+  R-->>U: Email reçu (~1-5s)
+  API-->>Site: 202 Accepted (toujours, anti-énumération)
+  Site-->>B: "Si un compte existe, tu recevras un lien"
+
+  U->>B: Click link in email
+  B->>API: GET /api/players/auth/magic-link/verify?token=...
+  API->>DB: SELECT magic_link, check expires_at + used_at
+  DB-->>API: row
+  API->>DB: UPDATE used_at = now()<br/>UPSERT players email_verified=true
+  API->>API: Signer.IssuePlayer<br/>aud=pokclock-player, ttl 30 jours
+  API-->>B: Set-Cookie pokclock_player<br/>Domain=.pokclock.com<br/>302 → /fr/joueurs/dashboard
+  B->>Site: GET /joueurs/dashboard (cookie inclus)
+  Site->>API: GET /api/players/me (Cookie forward)
+  API-->>Site: profil joueur
+  Site-->>B: Page dashboard
+
+  Note over DB: Cleanup goroutine /6h purge<br/>WHERE used_at NOT NULL OR expires_at &lt; now
+</div>
+</section>
+
+<!-- ============================================================
+     6. AUTH JOUEUR GOOGLE OAUTH
+============================================================ -->
+<section id="auth-player-google">
+<h2>6. Auth joueur Google OAuth</h2>
+<p>
+Alternative au magic link. Le joueur clique "Continuer avec Google", Google redirige vers l'API, l'API exchange le code et upsert le compte joueur. Pas besoin de re-saisir l'email.
+</p>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as Joueur
+  participant B as Navigateur
+  participant API as api.pokclock.com
+  participant G as Google OAuth
+  participant DB as Postgres
+
+  U->>B: Click "Continuer avec Google"
+  B->>API: GET /api/players/auth/google/start
+  API->>API: Génère state random (32 bytes)
+  API-->>B: Set-Cookie pokclock_google_state (10min)<br/>302 → accounts.google.com/o/oauth2/v2/auth?<br/>client_id=...&state=...&scope=openid email profile
+  B->>G: Authorize (user consent si premier login)
+  G-->>B: 302 → api.pokclock.com/api/players/auth/google/callback?code=...&state=...
+  B->>API: GET callback
+  API->>API: Verify state cookie == query state
+  API->>G: POST /token<br/>{ code, client_id, client_secret, redirect_uri }
+  G-->>API: { access_token, id_token, ... }
+  API->>G: GET userinfo (Bearer access_token)
+  G-->>API: { sub, email, given_name, family_name }
+  API->>DB: SELECT players WHERE google_id = sub
+  alt nouveau Google user
+    API->>DB: SELECT players WHERE email = userinfo.email
+    alt compte magic-link existant
+      API->>DB: UPDATE players SET google_id, names<br/>email_verified=true
+    else
+      API->>DB: INSERT players (email, google_id, names, email_verified=true)
+    end
+  else compte Google déjà lié
+    API->>DB: UPDATE first/last_name si vide
+  end
+  API->>API: Signer.IssuePlayer
+  API-->>B: Set-Cookie pokclock_player<br/>302 → /fr/joueurs/dashboard
+</div>
+</section>
+
+<!-- ============================================================
+     7. SYNC GOOGLE CALENDAR
+============================================================ -->
+<section id="calendar-sync">
+<h2>7. Sync Google Calendar (opt-in)</h2>
+<p>
+Le joueur connecte son agenda Google via le panel "Mon agenda Google" du dashboard. Chaque inscription tournoi crée automatiquement un event Calendar. OAuth séparé du login avec scope <code>calendar.events</code> + <code>access_type=offline</code> + <code>prompt=consent</code> pour récupérer le refresh_token.
+</p>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as Joueur
+  participant API as api.pokclock.com
+  participant G as Google OAuth
+  participant Cal as Google Calendar API
+  participant DB as Postgres
+
+  rect rgba(88,166,255,0.05)
+    note right of U: Phase 1 — Connexion Calendar (one-shot)
+    U->>API: GET /me/google-calendar/start
+    API-->>U: 302 → Google authorize<br/>scope calendar.events + offline + prompt consent
+    U->>G: Consent
+    G-->>API: callback ?code
+    API->>G: Exchange → access_token + refresh_token
+    API->>DB: UPSERT player_google_tokens<br/>(player_id, access, refresh, expires_at)
+    API-->>U: 302 → dashboard?calendar_connected=1
+  end
+
+  rect rgba(63,185,80,0.05)
+    note right of U: Phase 2 — Inscription tournoi (auto)
+    U->>API: POST /me/clubs/:slug/tournaments/:id/register
+    API->>DB: INSERT tournament_registrations status=pending
+    API-->>U: 201 Created
+    par fire-and-forget goroutine
+      API->>API: calendarSync.OnRegistration
+      API->>DB: SELECT player_google_tokens
+      alt token expiré
+        API->>G: POST refresh
+        API->>DB: UPDATE access_token + expires_at
+      end
+      API->>Cal: POST /calendars/primary/events<br/>{ summary [En attente] tournoi, dates }
+      Cal-->>API: { id event123 }
+      API->>DB: UPDATE tournament_registrations<br/>SET google_event_id = event123
+    end
+  end
+
+  rect rgba(210,153,34,0.05)
+    note right of U: Phase 3 — Admin confirme (event update)
+    API->>Cal: PATCH /events/event123<br/>{ summary "tournoi" (retire prefix) }
+  end
+
+  rect rgba(248,81,73,0.05)
+    note right of U: Phase 4 — Cancel/reject (event delete)
+    API->>Cal: DELETE /events/event123
+    API->>DB: UPDATE google_event_id = NULL
+  end
+</div>
+</section>
+
+<!-- ============================================================
+     8. INSCRIPTION TOURNOI
+============================================================ -->
+<section id="registration-flow">
+<h2>8. Inscription à un tournoi publié</h2>
+<p>
+Trois cas selon (audience, joueur authentifié, membership) :
+</p>
+<ul>
+  <li><strong>Anonyme</strong> sur tournoi public : formulaire prénom/nom/email/phone → cancel_token email</li>
+  <li><strong>Joueur authentifié</strong> sur tournoi public : OneClick prefilled depuis le profil</li>
+  <li><strong>Joueur authentifié</strong> sur tournoi <code>members_only</code> : requiert <code>player_club_memberships.status = 'active'</code></li>
+</ul>
+
+<div class="mermaid">
+flowchart TB
+  Start([Visiteur sur /clubs/slug/tournois/id]) --> Auth{Connecté ?}
+
+  Auth -- non --> Aud1{audience ?}
+  Aud1 -- public --> Form["Formulaire prénom/nom/email/phone"]
+  Aud1 -- members_only --> CTA1["CTA 'Me connecter'"]
+
+  Auth -- oui --> Reg{déjà inscrit ?}
+  Reg -- oui --> Banner["Banner Tu es inscrit + status"]
+  Reg -- non --> Aud2{audience ?}
+  Aud2 -- public --> OneClick["OneClickRegister<br/>(prefill profil)"]
+  Aud2 -- members_only --> Memb{membership ?}
+  Memb -- active --> OneClick
+  Memb -- pending --> Wait["Banner 'Adhésion en attente'"]
+  Memb -- aucune ou rejected/revoked --> Join["Bouton Demander l'adhésion"]
+
+  Form --> SubA[POST /public/clubs/:slug/.../register]
+  OneClick --> SubB[POST /api/players/me/clubs/:slug/.../register]
+  Join --> JoinPost[POST /api/players/me/clubs/:slug/join]
+
+  SubA --> DB[(INSERT tournament_registrations<br/>player_id NULL)]
+  SubB --> DB2[(INSERT tournament_registrations<br/>player_id set)]
+  JoinPost --> DBM[(INSERT player_club_memberships<br/>status=pending)]
+
+  DB --> Email["Resend email confirmation<br/>+ cancel_token magic link"]
+  DB2 --> Cal["calendarSync.OnRegistration<br/>(fire-and-forget)"]
+  DB2 --> Email
+
+  classDef state fill:#1f6feb,stroke:#58a6ff,color:#fff
+  classDef dbCls fill:#3fb950,stroke:#2ea043,color:#000
+  class DB,DB2,DBM dbCls
+</div>
+</section>
+
+<!-- ============================================================
+     9. PUBLICATION RÉSULTATS
+============================================================ -->
+<section id="results-flow">
+<h2>9. Publication des résultats finaux + leaderboard</h2>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant TD as Admin TD<br/>(WPF)
+  participant API as pokclock-api
+  participant DB as Postgres
+  participant Site as pokclock.com
+
+  TD->>TD: Ouvre PublishResultsDialog<br/>saisit position+nom×N
+  TD->>TD: Coche "Appliquer barème de points"
+  alt scheme.type == custom
+    TD->>API: GET /api/club/point-scheme
+    API->>DB: SELECT point_schemes WHERE club_id
+    API-->>TD: { type: custom, params.formula }
+    TD->>TD: PointsCalculator.Calculate via NCalc<br/>(position, players, buyIn, prizePool)
+    note over TD: applyPointScheme=false<br/>points sont remplis explicitement
+  end
+  TD->>API: POST /api/club/tournaments/:id/results<br/>{ results: [...], applyPointScheme, closeTournament }
+  alt applyPointScheme && scheme.type != custom
+    API->>DB: SELECT point_schemes
+    API->>API: calculatePointsForPosition Go (linear/fixed/proportional)
+  end
+  API->>DB: BEGIN
+  API->>DB: DELETE tournament_results WHERE tournament_id
+  loop pour chaque entry
+    API->>DB: INSERT tournament_results<br/>(position, names, points, prize_amount)
+  end
+  opt closeTournament=true
+    API->>DB: UPDATE published_tournaments<br/>SET status='closed'
+  end
+  API->>DB: COMMIT
+  API-->>TD: { status, count, applied }
+
+  par sync calendrier
+    API->>API: calendarSync.OnStatusChange pour chaque registration confirmed<br/>(pas pour rejected)
+  end
+
+  Note over Site: Plus tard
+  participant V as Visiteur
+  V->>Site: GET /clubs/slug/classement
+  Site->>API: GET /public/clubs/:slug/leaderboard
+  API->>DB: SELECT agrégation cross-tournois<br/>GROUP BY lower(first_name), lower(last_name)<br/>ORDER BY total_points DESC
+  DB-->>API: top 50
+  API-->>Site: { entries }
+  Site-->>V: Page classement
+</div>
+</section>
+
+<!-- ============================================================
+     10. UML ENTITÉS
+============================================================ -->
+<section id="uml">
+<h2>10. UML — entités principales (Postgres)</h2>
+
+<div class="mermaid">
+classDiagram
+  direction LR
+
+  class clubs {
+    +uuid id PK
+    +text name UK
+    +text slug UK
+    +text plan
+    +text status
+    +bool online_registrations_enabled
+    +timestamptz created_at
+  }
+
+  class licenses {
+    +uuid id PK
+    +uuid club_id FK
+    +text license_key UK
+    +text worker_token_hash
+    +text role
+    +text status
+    +uuid member_id FK?
+  }
+
+  class members {
+    +uuid id PK
+    +uuid club_id FK
+    +text first_name
+    +text last_name
+    +text email?
+    +text status
+  }
+
+  class published_tournaments {
+    +uuid id PK
+    +uuid club_id FK
+    +text name
+    +timestamptz start_at
+    +numeric buy_in_amount
+    +text status
+    +text audience
+    +uuid season_id FK?
+    +bool show_players
+    +text players_display_mode
+    +jsonb local_players
+    +jsonb prize_structure
+  }
+
+  class tournament_registrations {
+    +uuid id PK
+    +uuid published_tournament_id FK
+    +text first_name
+    +text last_name
+    +text email
+    +uuid player_id FK?
+    +text status
+    +text cancel_token UK
+    +text google_event_id?
+  }
+
+  class tournament_results {
+    +uuid id PK
+    +uuid published_tournament_id FK
+    +int position
+    +text first_name
+    +text last_name
+    +uuid player_id FK?
+    +int points
+    +text prize_amount?
+  }
+
+  class players {
+    +uuid id PK
+    +text email UK
+    +text google_id UK?
+    +text first_name
+    +text last_name
+    +bool email_verified
+    +text status
+  }
+
+  class player_magic_links {
+    +text token PK
+    +text email
+    +timestamptz expires_at
+    +timestamptz used_at?
+  }
+
+  class player_club_memberships {
+    +uuid id PK
+    +uuid player_id FK
+    +uuid club_id FK
+    +text status
+    +timestamptz requested_at
+  }
+
+  class player_google_tokens {
+    +uuid player_id PK FK
+    +text access_token
+    +text refresh_token
+    +timestamptz expires_at
+  }
+
+  class point_schemes {
+    +uuid club_id PK FK
+    +text name
+    +text type
+    +jsonb params
+  }
+
+  class seasons {
+    +uuid id PK
+    +uuid club_id FK
+    +text slug
+    +text name
+    +timestamptz starts_at
+    +timestamptz ends_at
+    +text status
+  }
+
+  clubs "1" *-- "*" licenses : owns
+  clubs "1" *-- "*" members : staff
+  clubs "1" *-- "*" published_tournaments : publishes
+  clubs "1" o-- "1" point_schemes : configures
+  clubs "1" *-- "*" seasons : organizes
+  clubs "1" o-- "*" player_club_memberships : has members
+
+  members "1" o-- "*" licenses : assigned to
+
+  published_tournaments "1" *-- "*" tournament_registrations
+  published_tournaments "1" *-- "*" tournament_results
+  published_tournaments "*" o-- "1" seasons : optional belongs
+
+  players "1" o-- "*" tournament_registrations : registers
+  players "1" o-- "*" tournament_results : performs
+  players "1" o-- "*" player_club_memberships : joins
+  players "1" o-- "1" player_google_tokens : connects
+</div>
+
+<p style="margin-top:1rem;color:var(--fg-muted);font-size:0.9rem;">
+Voir le détail colonne par colonne et qui-écrit-quoi dans <a href="database-schema.html">Schéma base de données</a>.
+</p>
+</section>
+
+<!-- ============================================================
+     11. ÉTATS INSCRIPTION
+============================================================ -->
+<section id="registration-state">
+<h2>11. États d'une inscription tournoi</h2>
+
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> pending : POST register
+  pending --> confirmed : admin POST /confirm
+  pending --> rejected : admin POST /reject
+  pending --> cancelled : joueur DELETE /me/registrations/:id<br/>OU GET /public/registrations/:token/cancel
+  confirmed --> cancelled : joueur ou cancel_token
+  rejected --> [*]
+  cancelled --> [*]
+  confirmed --> [*] : tournoi finished
+</div>
+
+<p>
+<strong>Transitions interdites</strong> : <code>rejected → confirmed</code>, <code>cancelled → confirmed</code>. Pour ré-inscrire un joueur après cancel, l'admin doit lui faire refaire une nouvelle inscription (la précédente reste en trace).
+</p>
+</section>
+
+<!-- ============================================================
+     12. ÉTATS ADHÉSION
+============================================================ -->
+<section id="membership-state">
+<h2>12. États d'une adhésion club (Phase 0.F)</h2>
+
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> pending : joueur POST /me/clubs/:slug/join
+  pending --> active : admin POST /memberships/:id/approve
+  pending --> rejected : admin POST /memberships/:id/reject
+  active --> revoked : admin POST /memberships/:id/revoke
+  active --> [*] : joueur DELETE /me/clubs/:slug
+  rejected --> pending : re-demande (POST /join réinitialise)
+  revoked --> pending : re-demande
+</div>
+
+<p>
+Le re-trigger <code>rejected → pending</code> permet à un joueur de retenter sa demande après refus (peut-être que l'admin avait des questions, le joueur peut re-poster). De même <code>revoked → pending</code> permet la réintégration après exclusion.
+</p>
+</section>
+
+<footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
+  <p>Architecture PokClock · Documents sources : <a href="database-schema.html">DB Schema</a> · <a href="players-data-storage.html">Joueurs &amp; RGPD</a> · <a href="phase-0b-bilan.html">Bilan phases</a> · <a href="index.html">Référence technique</a></p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#0f1419',
+      primaryColor: '#1f6feb',
+      primaryTextColor: '#c9d1d9',
+      primaryBorderColor: '#58a6ff',
+      lineColor: '#8b949e',
+      secondaryColor: '#3fb950',
+      tertiaryColor: '#d29922',
+    },
+    flowchart: { curve: 'basis', padding: 20 },
+    sequence: { actorMargin: 50, boxMargin: 10 },
+  });
+  hljs.highlightAll();
+</script>
+</body>
+</html>
