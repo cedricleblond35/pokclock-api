@@ -79,11 +79,11 @@ func (h *playersDashboardHandler) getDashboard(c echo.Context) error {
 	}
 	ctx := c.Request().Context()
 
-	var firstName, lastName string
+	var firstName, lastName, email string
 	err := h.pool.QueryRow(ctx,
-		`SELECT first_name, last_name FROM players WHERE id = $1 AND status = 'active'`,
+		`SELECT first_name, last_name, email FROM players WHERE id = $1 AND status = 'active'`,
 		claims.PlayerID,
-	).Scan(&firstName, &lastName)
+	).Scan(&firstName, &lastName, &email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusGone, map[string]string{"error": "player_gone"})
@@ -91,6 +91,12 @@ func (h *playersDashboardHandler) getDashboard(c echo.Context) error {
 		h.logger.Error("dashboard fetch profile", "err", err, "player_id", claims.PlayerID)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "db_read"})
 	}
+
+	// Phase 0.I : retrigger l'auto-link 0.H à chaque chargement du dashboard.
+	// Permet au joueur de voir une nouvelle adhésion apparaître après que
+	// l'admin a publié un tournoi le concernant, sans avoir à se relogger.
+	// Idempotent : ON CONFLICT DO NOTHING sur player_club_memberships.
+	autoLinkPlayerToClubs(ctx, h.pool, h.logger, claims.PlayerID, email)
 
 	rows, err := h.pool.Query(ctx,
 		`SELECT c.id, c.slug, c.name,
