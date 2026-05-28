@@ -1,0 +1,1724 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schéma base de données — pokclock-api</title>
+<meta name="description" content="Inventaire complet des 13 tables Postgres, leurs colonnes, relations, et qui les consomme par endpoint.">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+
+<div class="layout">
+
+<aside>
+  <a href="index.html" class="brand">pokclock-api
+    <small>Documentation</small>
+  </a>
+
+  <nav>
+    <ol>
+      <li><a href="index.html">Référence technique principale</a></li>
+      <li class="active"><a href="database-schema.html">DB Schema</a></li>
+      <li><a href="players-data-storage.html">Joueurs & RGPD</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B</a></li>
+    </ol>
+  </nav>
+
+  <div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.8rem;color:var(--fg-muted);">
+    <p>Sources MD :</p>
+    <ul style="list-style:none;padding:0;margin:0;">
+      <li><a href="DATABASE_SCHEMA.md">DATABASE_SCHEMA.md</a></li>
+      <li><a href="PLAYERS_DATA_STORAGE.md">PLAYERS_DATA_STORAGE.md</a></li>
+    </ul>
+    <p style="margin-top:0.5rem;"><a href="https://github.com/cedricleblond35/pokclock-api">Repo GitHub</a></p>
+  </div>
+</aside>
+
+<main id="top">
+
+<div class="banner">
+  <h1>Schéma base de données</h1>
+  <p>Inventaire complet des 13 tables Postgres, leurs colonnes, relations, et qui les consomme par endpoint.</p>
+</div>
+
+<h1>Schéma base de données PokClock</h1>
+<blockquote>
+<p>Référence technique exhaustive : toutes les tables Postgres du backend <code>pokclock-api</code>, leur structure, les relations entre elles, et la liste des consommateurs (handlers HTTP + apps clientes).</p>
+</blockquote>
+<p>À jour au <strong>2026-05-27</strong>, après migration 023.</p>
+<p>Postgres 16-alpine, service Swarm <code>pokclock-api_postgres</code> sur VPS OVH <code>vps-eb94174b</code>. Toutes les tables vivent dans une seule base <code>pokclock</code>. Migrations gérées par <code>goose</code> au boot de l&#39;API.</p>
+<hr>
+<h2>Vue d&#39;ensemble — diagramme des relations</h2>
+<pre><code>                  ┌──────────┐
+                  │  clubs   │
+                  └────┬─────┘
+                       │ 1
+        ┌──────────────┼──────────────┬────────────────┐
+        │              │              │                │
+        │ N            │ N            │ N              │ 0..1
+        ▼              ▼              ▼                ▼
+   ┌─────────┐  ┌──────────┐  ┌──────────────────┐  ┌────────────────┐
+   │ members │  │ licenses │  │ published_       │  │ point_schemes  │
+   │         │  │          │  │   tournaments    │  │ (1-to-1 club)  │
+   └────┬────┘  └──────────┘  └────────┬─────────┘  └────────────────┘
+        │ 0..1                          │ 1
+        │ (assign member to license)    │
+        └─► licenses.member_id          ├──────────────┐
+                                        │ N            │ N
+                                        ▼              ▼
+                            ┌──────────────────┐  ┌────────────────────┐
+                            │ tournament_      │  │ tournament_results │
+                            │   registrations  │  │                    │
+                            └────────┬─────────┘  └──────────┬─────────┘
+                                     │ 0..1                  │ 0..1
+                                     │                       │
+                                     ▼                       ▼
+                                ┌────────────────────────────────┐
+                                │           players              │
+                                └──────────────┬─────────────────┘
+                                               │ logique
+                                               │ (pas de FK, keyé par email)
+                                               ▼
+                                  ┌─────────────────────────────┐
+                                  │   player_magic_links        │
+                                  └─────────────────────────────┘
+
+
+               ┌────────────┐         ┌──────────────────┐
+               │ structures │ ─ N ──► │ structures_audit │
+               └────────────┘         └──────────────────┘
+                     ▲
+                     │ 0..1 (club_id, nullable rétro-compat Phase 0.A)
+                     │
+               ┌─────┴────┐
+               │  clubs   │
+               └──────────┘
+</code></pre>
+<p><code>clubs</code> est l&#39;agrégat racine. Tout le reste (sauf <code>players</code> et ses dépendances) y est rattaché par FK avec <code>ON DELETE CASCADE</code>.</p>
+<hr>
+<h2>Inventaire des tables</h2>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Rôle</th>
+<th>Volumétrie attendue</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="#clubs"><code>clubs</code></a></td>
+<td>Organisation/casino/association</td>
+<td>~10-100</td>
+</tr>
+<tr>
+<td><a href="#licenses"><code>licenses</code></a></td>
+<td>Licence desktop activée sur un PC</td>
+<td>~10-1000</td>
+</tr>
+<tr>
+<td><a href="#members"><code>members</code></a></td>
+<td>Personnes d&#39;un club (croupiers, admins)</td>
+<td>~100-1000</td>
+</tr>
+<tr>
+<td><a href="#structures"><code>structures</code></a></td>
+<td>Modèles de tournoi partagés cross-PC du club</td>
+<td>~10-100 par club</td>
+</tr>
+<tr>
+<td><a href="#structures_audit"><code>structures_audit</code></a></td>
+<td>Audit log des changements sur <code>structures</code></td>
+<td>grossit linéairement</td>
+</tr>
+<tr>
+<td><a href="#published_tournaments"><code>published_tournaments</code></a></td>
+<td>Tournoi publié sur le site public</td>
+<td>~100-10000</td>
+</tr>
+<tr>
+<td><a href="#tournament_registrations"><code>tournament_registrations</code></a></td>
+<td>Inscription joueur à un tournoi publié</td>
+<td>~1000-100000</td>
+</tr>
+<tr>
+<td><a href="#tournament_results"><code>tournament_results</code></a></td>
+<td>Classement final d&#39;un tournoi</td>
+<td>~position_count par tournoi</td>
+</tr>
+<tr>
+<td><a href="#point_schemes"><code>point_schemes</code></a></td>
+<td>Barème de points du club (1-to-1)</td>
+<td>= nombre de clubs</td>
+</tr>
+<tr>
+<td><a href="#players"><code>players</code></a></td>
+<td>Compte joueur (magic link auth)</td>
+<td>~100-10000</td>
+</tr>
+<tr>
+<td><a href="#player_magic_links"><code>player_magic_links</code></a></td>
+<td>Tokens login passwordless temporaires</td>
+<td>auto-purgé /6h</td>
+</tr>
+<tr>
+<td><a href="#player_club_memberships"><code>player_club_memberships</code></a></td>
+<td>Adhésion joueur ↔ club (Phase 0.F)</td>
+<td>~1000-50000</td>
+</tr>
+<tr>
+<td><a href="#player_google_tokens"><code>player_google_tokens</code></a></td>
+<td>Tokens OAuth Calendar par joueur (Phase 0.E.5)</td>
+<td>sous-ensemble des players</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>clubs</h2>
+<blockquote>
+<p>L&#39;organisation racine. Un club = un casino, une association, un club amateur. Toutes les autres ressources (sauf joueurs) lui appartiennent.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td><code>uuid_generate_v4()</code></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>text NOT NULL UNIQUE</td>
+<td>Affichage utilisateur</td>
+</tr>
+<tr>
+<td><code>slug</code></td>
+<td>text NOT NULL UNIQUE</td>
+<td>URL-safe, généré côté admin. Utilisé dans <code>/public/clubs/:slug/*</code>. Ajouté en 008</td>
+</tr>
+<tr>
+<td><code>plan</code></td>
+<td>text NOT NULL</td>
+<td><code>solo</code> / <code>club</code> / <code>pro</code>, default <code>solo</code></td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>text NULL</td>
+<td>Email du club (activation licenses desktop)</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text NOT NULL</td>
+<td><code>active</code> / <code>suspended</code> / <code>deleted</code>, default <code>active</code></td>
+</tr>
+<tr>
+<td><code>notes</code></td>
+<td>text NULL</td>
+<td>Notes internes admin</td>
+</tr>
+<tr>
+<td><code>online_registrations_enabled</code></td>
+<td>bool NOT NULL</td>
+<td>Opt-in pour les inscriptions en ligne. Ajouté en 008. Default <code>false</code></td>
+</tr>
+<tr>
+<td><code>created_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td>Trigger <code>set_updated_at</code></td>
+</tr>
+<tr>
+<td><code>suspended_at</code></td>
+<td>timestamptz NULL</td>
+<td>Renseigné au passage <code>active → suspended</code></td>
+</tr>
+</tbody></table>
+<p>Index : <code>idx_clubs_status</code>, <code>idx_clubs_plan</code>, <code>idx_clubs_slug</code> (UNIQUE).</p>
+<p>Migrations : 003 (create), 008 (slug + online_registrations_enabled).</p>
+<h3>Qui tape sur <code>clubs</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Super-admin</td>
+<td><code>GET /api/admin/clubs</code> (list paginée + filtres)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>POST /api/admin/clubs</code> (create)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>GET /api/admin/clubs/:id</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>PATCH /api/admin/clubs/:id</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>POST /api/admin/clubs/:id/suspend</code> / <code>unsuspend</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>DELETE /api/admin/clubs/:id</code> (soft delete)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>GET /api/club/info</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>PATCH /api/club/online-registrations</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/tournaments</code> (resolveClub par slug)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/tournaments/:id</code> (resolveClub)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/leaderboard</code> (resolveClub)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Worker <code>/verify</code></td>
+<td>JOIN pour récupérer <code>club.id</code> au moment d&#39;émettre le JWT</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/admin_clubs.go"><code>internal/api/admin_clubs.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_audit_info.go"><code>internal/api/club_audit_info.go</code></a>.</p>
+<hr>
+<h2>licenses</h2>
+<blockquote>
+<p>Une license desktop activée sur un PC. Liée à un club (FK CASCADE) et optionnellement à un member (FK SET NULL).</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>club_id</code></td>
+<td>uuid NOT NULL FK → clubs.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>license_key</code></td>
+<td>text NOT NULL UNIQUE</td>
+<td>Format <code>POK-XXXX-XXXX-XXXX-XXXX</code></td>
+</tr>
+<tr>
+<td><code>worker_token_hash</code></td>
+<td>text NOT NULL</td>
+<td>SHA-256 hex du token Worker. Original jamais persisté</td>
+</tr>
+<tr>
+<td><code>hardware_id</code></td>
+<td>text NULL</td>
+<td>Set par le Worker au premier activate</td>
+</tr>
+<tr>
+<td><code>role</code></td>
+<td>text NOT NULL</td>
+<td><code>member</code> / <code>admin</code> / <code>superadmin</code>, default <code>member</code></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text NOT NULL</td>
+<td><code>active</code> / <code>revoked</code> / <code>expired</code>, default <code>active</code></td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>timestamptz NULL</td>
+<td>NULL = perpétuel</td>
+</tr>
+<tr>
+<td><code>last_seen_at</code></td>
+<td>timestamptz NULL</td>
+<td>Maj à chaque <code>/api/auth/issue</code></td>
+</tr>
+<tr>
+<td><code>created_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td>Trigger</td>
+</tr>
+<tr>
+<td><code>revoked_at</code></td>
+<td>timestamptz NULL</td>
+<td>Renseigné au revoke</td>
+</tr>
+<tr>
+<td><code>member_id</code></td>
+<td>uuid NULL FK → members.id ON DELETE SET NULL</td>
+<td>Ajouté en 007. Optionnel</td>
+</tr>
+</tbody></table>
+<p>Index : <code>idx_licenses_club_id</code>, <code>idx_licenses_status</code>, <code>idx_licenses_hardware_id</code>, <code>idx_licenses_member_id</code>.</p>
+<p>Migrations : 004 (create), 007 (member_id FK).</p>
+<h3>Qui tape sur <code>licenses</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Super-admin</td>
+<td><code>GET /api/admin/licenses</code> (list + filtres clubId/status/role)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>POST /api/admin/licenses</code> (génère key + token, hash en SHA-256, propage au Worker D1)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>POST /api/admin/licenses/:id/revoke</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>GET /api/club/licenses</code> (limité à <code>claims.ClubID</code>)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/licenses</code> (idem)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/licenses/:id/revoke</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/licenses/:id/assign-member</code> (set/clear <code>member_id</code>)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>API auth</td>
+<td><code>POST /api/auth/issue</code> (lecture du <code>worker_token_hash</code> pour validation)</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/admin_licenses.go"><code>internal/api/admin_licenses.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_licenses.go"><code>internal/api/club_licenses.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/auth.go"><code>internal/api/auth.go</code></a>.</p>
+<hr>
+<h2>members</h2>
+<blockquote>
+<p>Personnes rattachées à un club (croupier, dealer, admin de club). Indépendant des licenses : un membre peut exister sans license, une license peut être non assignée.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>club_id</code></td>
+<td>uuid NOT NULL FK → clubs.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>first_name</code>, <code>last_name</code></td>
+<td>text NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>text NULL</td>
+<td>Contact direct, indépendant de l&#39;email d&#39;activation license</td>
+</tr>
+<tr>
+<td><code>notes</code></td>
+<td>text NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text NOT NULL</td>
+<td><code>active</code> / <code>inactive</code>, default <code>active</code></td>
+</tr>
+<tr>
+<td><code>created_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td>Trigger</td>
+</tr>
+</tbody></table>
+<p>Index : <code>idx_members_club_id</code>, <code>idx_members_status</code>.</p>
+<p>Migration : 007.</p>
+<h3>Qui tape sur <code>members</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Club admin</td>
+<td><code>GET /api/club/members</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/members</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>PATCH /api/club/members/:id</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>DELETE /api/club/members/:id</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>GET /api/admin/clubs/:id/members</code> (visibilité cross-club)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin via licenses</td>
+<td>LEFT JOIN dans <code>GET /api/club/licenses</code> pour afficher le nom du titulaire</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_members.go"><code>internal/api/club_members.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/admin_clubs.go"><code>internal/api/admin_clubs.go</code></a>.</p>
+<hr>
+<h2>structures</h2>
+<blockquote>
+<p>Modèle de tournoi (TournamentPreset) sérialisé en jsonb. Partage cross-PC d&#39;un même club. <code>kind</code> indique l&#39;origine (club / casino / home / streamer / other), <code>settings</code> contient le payload structuré.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>club_id</code></td>
+<td>uuid NULL FK → clubs.id ON DELETE CASCADE</td>
+<td>Nullable en 001/005 pour rétro-compat Phase 0.A, devenu NOT NULL en 006</td>
+</tr>
+<tr>
+<td><code>slug</code></td>
+<td>text NOT NULL UNIQUE par club</td>
+<td>Index UNIQUE composite <code>(club_id, slug)</code></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>text NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>text NOT NULL CHECK</td>
+<td><code>club</code> / <code>casino</code> / <code>home</code> / <code>streamer</code> / <code>other</code></td>
+</tr>
+<tr>
+<td><code>settings</code></td>
+<td>jsonb NOT NULL DEFAULT <code>{}</code></td>
+<td>Payload : <code>ClubStructureSettings</code> côté C#</td>
+</tr>
+<tr>
+<td><code>created_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td>Trigger</td>
+</tr>
+</tbody></table>
+<p>Index : <code>idx_structures_kind</code>, UNIQUE <code>(club_id, slug)</code>.</p>
+<p>Migrations : 001 (create), 005 (club_id nullable), 006 (NOT NULL + index unique).</p>
+<h3>Qui tape sur <code>structures</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>App WPF (license <code>member</code>/<code>admin</code>/<code>superadmin</code>)</td>
+<td><code>GET /api/structures</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>App WPF</td>
+<td><code>POST /api/structures</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>App WPF</td>
+<td><code>GET /api/structures/:slug</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>App WPF</td>
+<td><code>PATCH /api/structures/:slug</code> (admin/superadmin only)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>App WPF</td>
+<td><code>DELETE /api/structures/:slug</code></td>
+<td></td>
+<td>x</td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/structures.go"><code>internal/api/structures.go</code></a>.</p>
+<hr>
+<h2>structures_audit</h2>
+<blockquote>
+<p>Audit log immutable des changements sur <code>structures</code>. Action = <code>created</code> / <code>updated</code> / <code>deleted</code>, payload diff dans <code>changes</code> (jsonb).</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>structure_id</code></td>
+<td>uuid NOT NULL FK → structures.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td>text NOT NULL CHECK</td>
+<td><code>created</code> / <code>updated</code> / <code>deleted</code></td>
+</tr>
+<tr>
+<td><code>changes</code></td>
+<td>jsonb NOT NULL</td>
+<td>Diff structuré selon l&#39;action</td>
+</tr>
+<tr>
+<td><code>actor</code></td>
+<td>text NOT NULL</td>
+<td>Typiquement la license_key ou le subject du JWT</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Index : <code>idx_structures_audit_structure_id</code>, <code>idx_structures_audit_created_at DESC</code>.</p>
+<p>Migration : 002.</p>
+<h3>Qui tape sur <code>structures_audit</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Handlers <code>structures.go</code></td>
+<td>INSERT dans la même transaction que les opérations CRUD sur <code>structures</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Super-admin</td>
+<td><code>GET /api/admin/audit</code> (cross-clubs, filtres clubId/actor/action/dates)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>GET /api/club/audit</code> (scope <code>claims.ClubID</code> via JOIN sur structures)</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/structures.go"><code>internal/api/structures.go</code></a> (writes), <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/admin_audit.go"><code>internal/api/admin_audit.go</code></a> + <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_audit_info.go"><code>internal/api/club_audit_info.go</code></a> (reads).</p>
+<hr>
+<h2>published_tournaments</h2>
+<blockquote>
+<p>Tournoi publié sur le site public depuis l&#39;app WPF via &quot;Publier en ligne&quot;. Snapshot des paramètres du tournoi local + state online. UPSERT lors de la republication (anti-doublon via index unique partiel).</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>club_id</code></td>
+<td>uuid NOT NULL FK → clubs.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>text NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>text NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>start_at</code></td>
+<td>timestamptz NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>buy_in_amount</code></td>
+<td>numeric(10,2) NOT NULL DEFAULT 0</td>
+<td>Précision décimale préservée</td>
+</tr>
+<tr>
+<td><code>buy_in_fees</code></td>
+<td>numeric(10,2) NOT NULL DEFAULT 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>starting_stack</code></td>
+<td>integer NOT NULL DEFAULT 0</td>
+<td></td>
+</tr>
+<tr>
+<td><code>max_players</code></td>
+<td>integer NOT NULL DEFAULT 0</td>
+<td>0 = illimité</td>
+</tr>
+<tr>
+<td><code>format</code></td>
+<td>text NOT NULL DEFAULT <code>Freezeout</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>late_reg_enabled</code></td>
+<td>bool NOT NULL DEFAULT true</td>
+<td></td>
+</tr>
+<tr>
+<td><code>late_reg_until_level</code></td>
+<td>integer NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>local_tournament_id</code></td>
+<td>integer NULL</td>
+<td>ID local côté SQLite WPF, sert à l&#39;upsert</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text NOT NULL</td>
+<td><code>open</code> / <code>closed</code> / <code>cancelled</code>, default <code>open</code></td>
+</tr>
+<tr>
+<td><code>blinds_summary</code></td>
+<td>jsonb NULL</td>
+<td>Résumé blinds pour affichage public</td>
+</tr>
+<tr>
+<td><code>show_players</code></td>
+<td>bool NOT NULL DEFAULT false</td>
+<td>Ajouté en 012</td>
+</tr>
+<tr>
+<td><code>players_display_mode</code></td>
+<td>text NOT NULL DEFAULT <code>hidden</code></td>
+<td><code>hidden</code> / <code>pseudo</code> / <code>first_initial_last</code> / <code>full_name</code>. Ajouté en 012</td>
+</tr>
+<tr>
+<td><code>local_players</code></td>
+<td>jsonb NOT NULL DEFAULT <code>[]</code></td>
+<td>Snapshot des joueurs locaux poussés par WPF. Ajouté en 012</td>
+</tr>
+<tr>
+<td><code>prize_structure</code></td>
+<td>jsonb NULL</td>
+<td>Payouts calculés côté WPF. Ajouté en 013</td>
+</tr>
+<tr>
+<td><code>audience</code></td>
+<td>text NOT NULL DEFAULT <code>public</code> CHECK</td>
+<td><code>public</code> ou <code>members_only</code>. Ajouté en 021 (Phase 0.F)</td>
+</tr>
+<tr>
+<td><code>published_by_license</code></td>
+<td>text NOT NULL</td>
+<td>License_key du publisher</td>
+</tr>
+<tr>
+<td><code>published_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Index :</p>
+<ul>
+<li><code>idx_published_tournaments_club_id</code></li>
+<li><code>idx_published_tournaments_status</code></li>
+<li><code>idx_published_tournaments_start_at</code></li>
+<li><code>idx_published_tournaments_local_active</code> UNIQUE partiel <code>WHERE local_tournament_id IS NOT NULL AND status &lt;&gt; &#39;cancelled&#39;</code> (ajouté en 011, anti-doublon republish)</li>
+</ul>
+<p>Migrations : 009 (create), 011 (partial unique index), 012 (show_players/display_mode/local_players), 013 (prize_structure).</p>
+<h3>Qui tape sur <code>published_tournaments</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Club admin</td>
+<td><code>GET /api/club/tournaments</code> (list + pending/confirmed counts)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin via WPF</td>
+<td><code>POST /api/club/tournaments</code> (UPSERT par <code>(club_id, local_tournament_id)</code>)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/tournaments/:id/close</code> / <code>cancel</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/tournaments/:id/results</code> (passe en <code>closed</code> si <code>closeTournament=true</code>)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/tournaments</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/tournaments/:id</code> (LEFT JOIN point_schemes, calcul confirmedCount + localPlayersCount)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>POST /public/clubs/:slug/tournaments/:id/register</code> (lit capacity + jsonb_array_length(local_players))</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>POST /api/players/me/clubs/:slug/tournaments/:id/register</code> (idem + player_id)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>GET /api/players/me/registrations</code> (JOIN pour récupérer nom/start_at)</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_tournaments.go"><code>internal/api/club_tournaments.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/public_tournaments.go"><code>internal/api/public_tournaments.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_tournament_results.go"><code>internal/api/club_tournament_results.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_registrations.go"><code>internal/api/players_registrations.go</code></a>.</p>
+<hr>
+<h2>tournament_registrations</h2>
+<blockquote>
+<p>Inscription d&#39;un joueur à un tournoi publié. Peut être anonyme (Phase 0.D-α, identifié par <code>cancel_token</code>) ou liée à un compte joueur (Phase 0.E.2 via <code>player_id</code>).</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>published_tournament_id</code></td>
+<td>uuid NOT NULL FK → published_tournaments.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>first_name</code>, <code>last_name</code>, <code>email</code></td>
+<td>text NOT NULL</td>
+<td>Données saisies à l&#39;inscription. Anonymisées au DELETE player</td>
+</tr>
+<tr>
+<td><code>phone</code></td>
+<td>text NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text NOT NULL</td>
+<td><code>pending</code> / <code>confirmed</code> / <code>rejected</code> / <code>cancelled</code>, default <code>pending</code></td>
+</tr>
+<tr>
+<td><code>moderated_by_license</code></td>
+<td>text NULL</td>
+<td>License_key de l&#39;admin qui a confirmé/refusé</td>
+</tr>
+<tr>
+<td><code>moderated_at</code></td>
+<td>timestamptz NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>moderation_reason</code></td>
+<td>text NULL</td>
+<td>Motif optionnel sur reject</td>
+</tr>
+<tr>
+<td><code>cancel_token</code></td>
+<td>text NOT NULL UNIQUE</td>
+<td>32 bytes base64url, magic link annulation email</td>
+</tr>
+<tr>
+<td><code>player_id</code></td>
+<td>uuid NULL FK → players.id ON DELETE SET NULL</td>
+<td>Ajouté en 017. Set si inscription via compte</td>
+</tr>
+<tr>
+<td><code>google_event_id</code></td>
+<td>text NULL</td>
+<td>ID de l&#39;event Google Calendar associé (Phase 0.E.5). Set via calendarSync. NULL si joueur n&#39;a pas Calendar connecté ou si l&#39;API a échoué. Ajouté en 023</td>
+</tr>
+<tr>
+<td><code>registered_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Index :</p>
+<ul>
+<li><code>idx_tournament_registrations_tournament</code> <code>(published_tournament_id)</code></li>
+<li><code>idx_tournament_registrations_status</code></li>
+<li><code>idx_tournament_registrations_email</code></li>
+<li><code>tournament_registrations_player_id_idx</code> <code>WHERE player_id IS NOT NULL</code></li>
+<li><code>tournament_registrations_player_active_uniq</code> UNIQUE partiel <code>(published_tournament_id, player_id) WHERE player_id IS NOT NULL AND status IN (&#39;pending&#39;,&#39;confirmed&#39;)</code> (anti-doublon player)</li>
+</ul>
+<p>Migrations : 010 (create), 017 (player_id + indexes).</p>
+<h3>Qui tape sur <code>tournament_registrations</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Public anonyme</td>
+<td><code>POST /public/clubs/:slug/tournaments/:id/register</code></td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Public anonyme</td>
+<td><code>GET /public/registrations/:token/cancel</code> (UPDATE status = cancelled)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>POST /api/players/me/clubs/:slug/tournaments/:id/register</code></td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>DELETE /api/players/me/registrations/:id</code> (scope <code>player_id = claims.PlayerID</code>)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>GET /api/players/me/registrations</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>GET /api/club/tournaments/:tid/registrations</code> (filtre par status)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/registrations/:id/confirm</code> / <code>reject</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin via WPF</td>
+<td><code>POST /api/club/tournaments</code> (auto-sync recompte les actives)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/tournaments</code> (compte confirmed pour <code>confirmedCount</code>)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Joueur RGPD</td>
+<td><code>DELETE /api/players/me</code> (anonymise les rows du player)</td>
+<td></td>
+<td>x</td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/public_tournaments.go"><code>internal/api/public_tournaments.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_registrations.go"><code>internal/api/club_registrations.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_registrations.go"><code>internal/api/players_registrations.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_me.go"><code>internal/api/players_me.go</code></a> (deleteMe).</p>
+<hr>
+<h2>tournament_results</h2>
+<blockquote>
+<p>Classement final d&#39;un tournoi. Publié depuis le WPF après le tournoi. Sert pour le leaderboard agrégé du club.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>published_tournament_id</code></td>
+<td>uuid NOT NULL FK → published_tournaments.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>position</code></td>
+<td>int NOT NULL CHECK &gt;= 1</td>
+<td>1 = vainqueur</td>
+</tr>
+<tr>
+<td><code>first_name</code>, <code>last_name</code></td>
+<td>text NOT NULL</td>
+<td>Anonymisés au DELETE player</td>
+</tr>
+<tr>
+<td><code>player_id</code></td>
+<td>uuid NULL FK → players.id ON DELETE SET NULL</td>
+<td>Set si l&#39;admin a lié le résultat à un compte</td>
+</tr>
+<tr>
+<td><code>points</code></td>
+<td>int NOT NULL DEFAULT 0</td>
+<td>Calculé via <code>point_schemes</code> ou fourni par WPF</td>
+</tr>
+<tr>
+<td><code>prize_amount</code></td>
+<td>text NULL</td>
+<td>Décimal en string, ex <code>&quot;100.00&quot;</code></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Contraintes : UNIQUE <code>(published_tournament_id, position)</code>.</p>
+<p>Index : <code>tournament_results_tournament_idx</code>, <code>tournament_results_player_idx</code> <code>WHERE player_id IS NOT NULL</code>.</p>
+<p>Migration : 018.</p>
+<h3>Qui tape sur <code>tournament_results</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Club admin via WPF</td>
+<td><code>POST /api/club/tournaments/:id/results</code> (DELETE+INSERT en transaction, calcul points via <code>point_schemes</code> si <code>applyPointScheme=true</code>)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/tournaments/:id/results</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/leaderboard</code> (agrégation GROUP BY <code>lower(first_name), lower(last_name)</code>)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Joueur RGPD</td>
+<td><code>DELETE /api/players/me</code> (anonymise les rows du player)</td>
+<td></td>
+<td>x</td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_tournament_results.go"><code>internal/api/club_tournament_results.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/public_results.go"><code>internal/api/public_results.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_me.go"><code>internal/api/players_me.go</code></a> (deleteMe).</p>
+<hr>
+<h2>point_schemes</h2>
+<blockquote>
+<p>Barème de points d&#39;un club. <strong>1-to-1 avec clubs</strong> (PRIMARY KEY = <code>club_id</code>, pas d&#39;<code>id</code> auto). Configurable depuis WPF via <code>Mon club &gt; INFO &gt; Configurer le barème</code>.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>club_id</code></td>
+<td>uuid PK FK → clubs.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>text NOT NULL</td>
+<td>Affichage public</td>
+</tr>
+<tr>
+<td><code>type</code></td>
+<td>text NOT NULL CHECK</td>
+<td><code>linear</code> / <code>fixed</code> / <code>proportional</code></td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>jsonb NOT NULL DEFAULT <code>{}</code></td>
+<td>Schéma dépend du type (cf. <code>PointsCalculator</code> côté WPF + helper Go)</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Migration : 014.</p>
+<h3>Qui tape sur <code>point_schemes</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Club admin via WPF</td>
+<td><code>GET /api/club/point-scheme</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin via WPF</td>
+<td><code>PUT /api/club/point-scheme</code> (UPSERT)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin via WPF</td>
+<td><code>DELETE /api/club/point-scheme</code></td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin via WPF</td>
+<td><code>POST /api/club/tournaments/:id/results</code> avec <code>applyPointScheme=true</code> (lit le barème pour calculer points)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /public/clubs/:slug/tournaments/:id</code> (LEFT JOIN, expose <code>pointScheme</code> au site)</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_point_schemes.go"><code>internal/api/club_point_schemes.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_tournament_results.go"><code>internal/api/club_tournament_results.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/public_tournaments.go"><code>internal/api/public_tournaments.go</code></a>.</p>
+<hr>
+<h2>players</h2>
+<blockquote>
+<p>Compte joueur (Phase 0.E.1). Auth passwordless via magic link email + Google OAuth (à venir 0.E.1.e). Aucune FK vers <code>clubs</code> : un joueur est cross-clubs par design (il peut s&#39;inscrire dans plusieurs).</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>text NOT NULL UNIQUE</td>
+<td>En clair. Indexé en <code>lower(email)</code></td>
+</tr>
+<tr>
+<td><code>google_id</code></td>
+<td>text UNIQUE NULL</td>
+<td><code>sub</code> Google OAuth (0.E.1.e, non encore actif)</td>
+</tr>
+<tr>
+<td><code>first_name</code>, <code>last_name</code></td>
+<td>text NOT NULL DEFAULT &#39;&#39;</td>
+<td></td>
+</tr>
+<tr>
+<td><code>email_verified</code></td>
+<td>bool NOT NULL DEFAULT false</td>
+<td>Passe à <code>true</code> après premier magic link consommé</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text NOT NULL CHECK</td>
+<td><code>active</code> / <code>banned</code> / <code>deleted</code></td>
+</tr>
+<tr>
+<td><code>created_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Index : <code>players_email_lower_idx</code> sur <code>lower(email)</code>.</p>
+<p>Migration : 015.</p>
+<h3>Qui tape sur <code>players</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Public</td>
+<td><code>GET /api/players/auth/magic-link/verify</code> (UPSERT par email, set <code>email_verified=true</code>)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>GET /api/players/me</code></td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>PATCH /api/players/me</code> (update first_name/last_name)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>DELETE /api/players/me</code> (hard delete dans transaction)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>POST /api/players/me/clubs/:slug/tournaments/:id/register</code> (lit le profil pour préremplir)</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_auth.go"><code>internal/api/players_auth.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_me.go"><code>internal/api/players_me.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_registrations.go"><code>internal/api/players_registrations.go</code></a>.</p>
+<p>Référence détaillée : <a href="players-data-storage.html"><code>PLAYERS_DATA_STORAGE.md</code></a>.</p>
+<hr>
+<h2>player_magic_links</h2>
+<blockquote>
+<p>Tokens de login temporaires. Pas de FK vers <code>players</code> (le compte peut ne pas exister au moment où le lien est généré). Keyé par email.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>token</code></td>
+<td>text PK</td>
+<td>32 bytes random base64url</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>text NOT NULL</td>
+<td>Indexé en <code>lower(email)</code></td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>timestamptz NOT NULL</td>
+<td><code>now() + 15 min</code> à la création</td>
+</tr>
+<tr>
+<td><code>used_at</code></td>
+<td>timestamptz NULL</td>
+<td>Set au verify, bloque réutilisation</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Index : <code>player_magic_links_email_idx</code> sur <code>(lower(email), created_at DESC)</code>.</p>
+<p>Migration : 016. Cleanup one-shot : 019.</p>
+<h3>Qui tape sur <code>player_magic_links</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Public</td>
+<td><code>POST /api/players/auth/magic-link</code> (INSERT)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Public</td>
+<td><code>GET /api/players/auth/magic-link/verify</code> (SELECT + UPDATE <code>used_at</code>)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur RGPD</td>
+<td><code>DELETE /api/players/me</code> (DELETE par email)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Background goroutine</td>
+<td><code>StartMagicLinkCleanup</code> (DELETE expired/used /6h)</td>
+<td></td>
+<td>x</td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_auth.go"><code>internal/api/players_auth.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_me.go"><code>internal/api/players_me.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/cleanup.go"><code>internal/api/cleanup.go</code></a>.</p>
+<hr>
+<h2>player_club_memberships</h2>
+<blockquote>
+<p>Adhésion d&#39;un compte joueur à un club (Phase 0.F). Permet de gérer les tournois <code>members_only</code> : seuls les joueurs avec une membership <code>active</code> sur le club peuvent s&#39;inscrire.</p>
+</blockquote>
+<p>Distinct de <code>members</code> (qui représente le staff du club : croupiers, dealers, admins).</p>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>player_id</code></td>
+<td>uuid NOT NULL FK → players.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>club_id</code></td>
+<td>uuid NOT NULL FK → clubs.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text NOT NULL CHECK</td>
+<td><code>pending</code> / <code>active</code> / <code>rejected</code> / <code>revoked</code>, default <code>pending</code></td>
+</tr>
+<tr>
+<td><code>requested_at</code></td>
+<td>timestamptz NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>moderated_by_license</code></td>
+<td>text NULL</td>
+<td>License_key de l&#39;admin qui a validé/refusé</td>
+</tr>
+<tr>
+<td><code>moderated_at</code></td>
+<td>timestamptz NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>moderation_reason</code></td>
+<td>text NULL</td>
+<td>Motif optionnel sur reject/revoke</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>timestamptz NOT NULL</td>
+<td>Trigger</td>
+</tr>
+</tbody></table>
+<p>Contraintes : UNIQUE <code>(player_id, club_id)</code>.</p>
+<p>Index : <code>player_club_memberships_player_idx</code>, <code>player_club_memberships_club_status_idx</code>.</p>
+<p>Migration : 020.</p>
+<h3>Qui tape sur <code>player_club_memberships</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Joueur authentifié</td>
+<td><code>POST /api/players/me/clubs/:slug/join</code> (INSERT pending, ou re-pending si rejected/revoked existant)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>GET /api/players/me/clubs</code> (list ses memberships)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>DELETE /api/players/me/clubs/:slug</code> (hard delete)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>GET /api/club/memberships?status=...</code> (JOIN players pour nom/email)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/memberships/:id/approve</code> (pending → active)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/memberships/:id/reject</code> (pending → rejected)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Club admin</td>
+<td><code>POST /api/club/memberships/:id/revoke</code> (active → revoked)</td>
+<td>x</td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>POST /api/players/me/clubs/:slug/tournaments/:id/register</code> (EXISTS check sur status=&#39;active&#39;)</td>
+<td>x</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_memberships.go"><code>internal/api/players_memberships.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_memberships.go"><code>internal/api/club_memberships.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_registrations.go"><code>internal/api/players_registrations.go</code></a>.</p>
+<hr>
+<h2>player_google_tokens</h2>
+<blockquote>
+<p>Tokens OAuth Google Calendar par joueur (Phase 0.E.5). 1-to-1 via PK player_id. Permet d&#39;auto-créer les events tournoi dans l&#39;agenda Google du joueur.</p>
+</blockquote>
+<p>Stockés en clair (réseau privé Swarm, attaquant DB a déjà tout). pgcrypto possible plus tard si défense en profondeur.</p>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>player_id</code></td>
+<td>uuid PK FK → players.id ON DELETE CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>access_token</code></td>
+<td>text NOT NULL</td>
+<td>Court (~1h Google), refresh auto via service</td>
+</tr>
+<tr>
+<td><code>refresh_token</code></td>
+<td>text NOT NULL</td>
+<td>Long terme, utilisé pour rafraîchir l&#39;access_token</td>
+</tr>
+<tr>
+<td><code>token_type</code></td>
+<td>text NOT NULL DEFAULT <code>Bearer</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>timestamptz NOT NULL</td>
+<td>Auto-refresh quand &lt; 1 min de marge</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>text NOT NULL</td>
+<td>Scopes accordés (en pratique <code>calendar.events</code>)</td>
+</tr>
+<tr>
+<td><code>connected_at</code></td>
+<td>timestamptz NOT NULL</td>
+<td>Date du premier consent</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>timestamptz NOT NULL</td>
+<td>Trigger</td>
+</tr>
+</tbody></table>
+<p>Migration : 022.</p>
+<h3>Qui tape sur <code>player_google_tokens</code></h3>
+<table>
+<thead>
+<tr>
+<th>Acteur</th>
+<th>Endpoint / opération</th>
+<th>Lecture</th>
+<th>Écriture</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Joueur authentifié</td>
+<td><code>GET /api/players/me/google-calendar/start</code> → callback (UPSERT)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>GET /api/players/me/google-calendar</code> (status SELECT)</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>Joueur authentifié</td>
+<td><code>DELETE /api/players/me/google-calendar</code> (revoke + DELETE)</td>
+<td></td>
+<td>x</td>
+</tr>
+<tr>
+<td>Background calendarSync</td>
+<td>À chaque sync : SELECT pour récupérer access_token. UPDATE après refresh si nouveau access_token.</td>
+<td>x</td>
+<td>x</td>
+</tr>
+</tbody></table>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_calendar.go"><code>internal/api/players_calendar.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/calendar_sync.go"><code>internal/api/calendar_sync.go</code></a>.</p>
+<hr>
+<h2>Patterns transverses</h2>
+<h3>Triggers <code>updated_at</code></h3>
+<p>Une fonction <code>set_updated_at()</code> est définie en 001 et réutilisée par toutes les tables qui ont un <code>updated_at</code>. Le trigger met à jour la colonne automatiquement à chaque UPDATE. Pas besoin de la setter à la main dans le code Go.</p>
+<p>Tables avec trigger : <code>structures</code>, <code>clubs</code>, <code>licenses</code>, <code>members</code>, <code>tournament_registrations</code>. Les autres (<code>published_tournaments</code>, <code>point_schemes</code>, <code>players</code>) la setent explicitement dans les queries <code>... SET updated_at = now() ...</code>.</p>
+<h3>Cascades FK</h3>
+<table>
+<thead>
+<tr>
+<th>Relation</th>
+<th>Comportement</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>clubs → *</code> (toutes les FK club_id)</td>
+<td><code>ON DELETE CASCADE</code> : supprimer un club supprime tout son contenu</td>
+</tr>
+<tr>
+<td><code>licenses.member_id → members.id</code></td>
+<td><code>ON DELETE SET NULL</code> : supprimer un membre détache ses licenses (pas de révocation auto)</td>
+</tr>
+<tr>
+<td><code>players → tournament_registrations.player_id</code></td>
+<td><code>ON DELETE SET NULL</code> : supprimer un joueur détache ses inscriptions historiques</td>
+</tr>
+<tr>
+<td><code>players → tournament_results.player_id</code></td>
+<td><code>ON DELETE SET NULL</code> idem</td>
+</tr>
+<tr>
+<td><code>published_tournaments → tournament_registrations.published_tournament_id</code></td>
+<td><code>ON DELETE CASCADE</code> : supprimer un tournoi supprime ses inscriptions</td>
+</tr>
+<tr>
+<td><code>published_tournaments → tournament_results.published_tournament_id</code></td>
+<td><code>ON DELETE CASCADE</code> idem pour les résultats</td>
+</tr>
+<tr>
+<td><code>structures → structures_audit.structure_id</code></td>
+<td><code>ON DELETE CASCADE</code></td>
+</tr>
+</tbody></table>
+<h3>Index uniques partiels</h3>
+<p>Deux index uniques partiels gèrent les contraintes métier complexes :</p>
+<ol>
+<li><p><strong><code>idx_published_tournaments_local_active</code></strong> (migration 011) :</p>
+<pre><code class="language-sql">UNIQUE (club_id, local_tournament_id)
+WHERE local_tournament_id IS NOT NULL AND status &lt;&gt; &#39;cancelled&#39;
+</code></pre>
+<p>Permet le pattern &quot;publier → annuler → republier&quot; sans doublon, tout en autorisant plusieurs rows <code>cancelled</code> pour la trace historique.</p>
+</li>
+<li><p><strong><code>tournament_registrations_player_active_uniq</code></strong> (migration 017) :</p>
+<pre><code class="language-sql">UNIQUE (published_tournament_id, player_id)
+WHERE player_id IS NOT NULL AND status IN (&#39;pending&#39;, &#39;confirmed&#39;)
+</code></pre>
+<p>Empêche un joueur connecté de s&#39;inscrire deux fois au même tournoi. Les inscriptions anonymes (<code>player_id IS NULL</code>) ne sont pas concernées (anti-doublon via email/cancel_token).</p>
+</li>
+</ol>
+<hr>
+<h2>Voir aussi</h2>
+<ul>
+<li><a href="https://github.com/cedricleblond35/pokclock-api/blob/main/README.md"><code>README.md</code></a> section &quot;Endpoints&quot; pour la liste des routes</li>
+<li><a href="players-data-storage.html"><code>PLAYERS_DATA_STORAGE.md</code></a> pour le focus joueurs + RGPD</li>
+<li>Migrations : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/"><code>internal/db/migrations/</code></a></li>
+<li>Handlers : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/"><code>internal/api/</code></a></li>
+</ul>
+
+
+<footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
+  <p>pokclock-api · Documentation auto-générée depuis les .md du repo.</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  hljs.highlightAll();
+</script>
+</body>
+</html>

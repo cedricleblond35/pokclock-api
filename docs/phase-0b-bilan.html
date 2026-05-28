@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 0.B — Bilan ops dashboard — pokclock-api</title>
+<meta name="description" content="Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G livrées en mai 2026.">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+
+<div class="layout">
+
+<aside>
+  <a href="index.html" class="brand">pokclock-api
+    <small>Documentation</small>
+  </a>
+
+  <nav>
+    <ol>
+      <li><a href="index.html">Référence technique principale</a></li>
+      <li><a href="database-schema.html">DB Schema</a></li>
+      <li><a href="players-data-storage.html">Joueurs & RGPD</a></li>
+      <li class="active"><a href="phase-0b-bilan.html">Phase 0.B</a></li>
+    </ol>
+  </nav>
+
+  <div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.8rem;color:var(--fg-muted);">
+    <p>Sources MD :</p>
+    <ul style="list-style:none;padding:0;margin:0;">
+      <li><a href="DATABASE_SCHEMA.md">DATABASE_SCHEMA.md</a></li>
+      <li><a href="PLAYERS_DATA_STORAGE.md">PLAYERS_DATA_STORAGE.md</a></li>
+    </ul>
+    <p style="margin-top:0.5rem;"><a href="https://github.com/cedricleblond35/pokclock-api">Repo GitHub</a></p>
+  </div>
+</aside>
+
+<main id="top">
+
+<div class="banner">
+  <h1>Phase 0.B — Bilan ops dashboard</h1>
+  <p>Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G livrées en mai 2026.</p>
+</div>
+
+<h1>Phase 0.B → ops.pokclock.com — Dashboard admin unifié</h1>
+<blockquote>
+<p><strong>Objectif</strong> : un seul URL (<code>ops.pokclock.com</code>), un seul login (Cloudflare Access),
+tout intégré : observabilité tech + gestion des clubs + licenses + audit.</p>
+</blockquote>
+<p><strong>Plan validé</strong> : 2026-05-24
+<strong>Estimation totale</strong> : ~5 jours de dev, livrables incrémentaux.</p>
+<p>Légende : <code>[ ]</code> todo · <code>[x]</code> fait · <code>[⏳]</code> en cours · <code>[👤]</code> action humaine</p>
+<hr>
+<h2>Étape 1 — Fondations (≈ 1 jour)</h2>
+<p>Objectif : observabilité tech complète, accessible en un login.</p>
+<ul>
+<li><input disabled="" type="checkbox"> Wildcard cert <code>*.pokclock.com</code> via OVH DNS-01<ul>
+<li>Modifier labels Traefik de <code>pokclock-api</code> : <code>tls.domains[0].main=*.pokclock.com</code> + <code>sans=pokclock.com</code></li>
+<li>Redéployer le stack, vérifier émission du wildcard via Traefik logs</li>
+</ul>
+</li>
+<li>[👤] Cloudflare Access setup<ul>
+<li>Cloudflare Zero Trust → Access → Applications → &quot;Add an application&quot; type Self-hosted</li>
+<li>Hostnames : <code>ops.pokclock.com</code>, <code>grafana.pokclock.com</code></li>
+<li>Policy : Include → Emails → <code>drick35@gmail.com</code></li>
+<li>Identity provider : Google OAuth (built-in)</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Stack monitoring dans <code>pokclock-infra/monitoring/</code><ul>
+<li><code>docker-compose.swarm.prod.yml</code> : services <code>grafana</code>, <code>loki</code>, <code>promtail</code>, <code>prometheus</code></li>
+<li>Réseau overlay interne <code>nw-ops</code> (Grafana exposé via Traefik sur <code>grafana.pokclock.com</code>, le reste interne)</li>
+<li>Volumes persistants pour Grafana et Prometheus</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Provisioning Grafana<ul>
+<li>Datasources : Postgres (sur <code>pokclock-api_postgres</code>), Loki, Prometheus</li>
+<li>Config <code>[auth.proxy]</code> trust header <code>Cf-Access-Authenticated-User-Email</code></li>
+<li>Désactiver le login Grafana built-in</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Promtail : tail Docker logs de tous les containers Swarm vers Loki</li>
+<li><input disabled="" type="checkbox"> Prometheus : scrape Traefik metrics + cAdvisor (optionnel) + futures <code>/metrics</code> API</li>
+<li><input disabled="" type="checkbox"> DNS : record A <code>grafana.pokclock.com → 54.38.243.50</code> (ou pas si wildcard CNAME)</li>
+<li><input disabled="" type="checkbox"> Test E2E : ouvrir <code>grafana.pokclock.com</code> → login Google → Grafana sans password</li>
+</ul>
+<p><strong>Valeur livrée</strong> : observabilité tech opérationnelle.</p>
+<hr>
+<h2>Étape 2 — Skeleton de l&#39;admin app (≈ 1 jour)</h2>
+<p>Objectif : <code>ops.pokclock.com</code> qui s&#39;ouvre, prête à recevoir le métier.</p>
+<ul>
+<li><input disabled="" type="checkbox"> Créer le repo <code>pokclock-ops</code> (Next.js 15, App Router, TypeScript)<ul>
+<li>Sidebar : Dashboard / Clubs / Licenses / Audit / Observabilité / Infrastructure / Backups / Facturation</li>
+<li>Topbar : nom user (depuis header CF Access) + bouton logout</li>
+<li>Theming cohérent avec pokclock-react (mêmes couleurs/fonts)</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Page <code>/</code> Dashboard (v0)<ul>
+<li>KPIs hardcodés au début (MRR placeholder, Clubs count placeholder)</li>
+<li>2-3 iframes Grafana pour les panels les plus parlants (latency p99, errors rate)</li>
+<li>Block &quot;Recent activity&quot; placeholder (fed par les vrais events plus tard)</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Dockerfile multi-stage + GHA Build &amp; Deploy similaire à pokclock-api</li>
+<li><input disabled="" type="checkbox"> Compose Swarm <code>docker-compose.swarm.prod.yml</code> avec labels Traefik pour <code>ops.pokclock.com</code></li>
+<li>[👤] Configurer Cloudflare Access sur le hostname</li>
+<li><input disabled="" type="checkbox"> DNS : record A <code>ops.pokclock.com → 54.38.243.50</code></li>
+<li><input disabled="" type="checkbox"> Premier deploy via GHA → vérifier en HTTPS derrière Access</li>
+</ul>
+<p><strong>Valeur livrée</strong> : la coquille est là, prête à se remplir.</p>
+<hr>
+<h2>Étape 3 — Backend admin + page Clubs (≈ 1.5 jour)</h2>
+<p>Objectif : gérer les clubs depuis l&#39;UI.</p>
+<h3>Backend (terminé 2026-05-25, commits <code>96884be</code> + <code>1083c92</code>)</h3>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> Migration goose Postgres<ul>
+<li><input checked="" disabled="" type="checkbox"> <code>003_clubs.sql</code> : table <code>clubs</code> (id uuid PK, name UK, plan CHECK solo/club/pro, status active/suspended/deleted, email, notes, timestamps + suspended_at)</li>
+<li><input checked="" disabled="" type="checkbox"> <code>004_licenses.sql</code> : table <code>licenses</code> (FK clubs CASCADE, license_key UK, worker_token_hash SHA-256, hardware_id nullable, role member/admin/superadmin, status active/revoked/expired, expires_at, last_seen_at, revoked_at)</li>
+<li><input checked="" disabled="" type="checkbox"> <code>005_structures_club_id.sql</code> : <code>ALTER structures ADD club_id</code> (nullable rétro-compat Phase 0.A) + index partial</li>
+</ul>
+</li>
+<li><input checked="" disabled="" type="checkbox"> Enrichir les claims JWT<ul>
+<li><input checked="" disabled="" type="checkbox"> <code>auth.Role</code> type avec constantes <code>RoleMember</code>, <code>RoleAdmin</code>, <code>RoleSuperadmin</code></li>
+<li><input checked="" disabled="" type="checkbox"> <code>Claims.Role</code> + <code>Claims.ClubID</code> (rétro-compat : tokens existants restent valides)</li>
+<li><input checked="" disabled="" type="checkbox"> <code>Signer.Issue(IssueParams{})</code> refactoré (struct au lieu de 4 params positionnels)</li>
+<li><input checked="" disabled="" type="checkbox"> <code>VerifyResponse</code> (Worker) expose <code>role</code> + <code>clubId</code> (optionnels)</li>
+<li><input checked="" disabled="" type="checkbox"> Fallback : Worker n&#39;expose pas encore → JWT émis en RoleMember</li>
+</ul>
+</li>
+<li><input checked="" disabled="" type="checkbox"> Middleware RBAC dans <code>internal/api/middleware.go</code><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>requireRole(role)</code> — exige exactement ce rôle</li>
+<li><input checked="" disabled="" type="checkbox"> <code>requireAnyRole(...)</code> — OU logique</li>
+</ul>
+</li>
+<li><input checked="" disabled="" type="checkbox"> Routes API admin (<code>internal/api/admin_clubs.go</code>, <code>admin_licenses.go</code>, <code>admin_audit.go</code>)<ul>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /api/admin/clubs</code> — liste paginée + filtres status/q + pagination</li>
+<li><input checked="" disabled="" type="checkbox"> <code>POST /api/admin/clubs</code> — création</li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /api/admin/clubs/:id</code> — détail</li>
+<li><input checked="" disabled="" type="checkbox"> <code>PATCH /api/admin/clubs/:id</code> — update name/plan/email/notes</li>
+<li><input checked="" disabled="" type="checkbox"> <code>POST /api/admin/clubs/:id/suspend</code> + <code>unsuspend</code></li>
+<li><input checked="" disabled="" type="checkbox"> <code>DELETE /api/admin/clubs/:id</code> — soft delete</li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /api/admin/licenses</code> — liste + filtres clubId/status/role</li>
+<li><input checked="" disabled="" type="checkbox"> <code>POST /api/admin/licenses</code> — génère license_key POK-XXXX-XXXX-XXXX-XXXX + worker_token 32 bytes hex, stocke uniquement SHA-256 du token</li>
+<li><input checked="" disabled="" type="checkbox"> <code>POST /api/admin/licenses/:id/revoke</code></li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /api/admin/audit</code> — recherche cross-clubs avec jointure structures, filtres clubId/actor/action/dates/structureId</li>
+</ul>
+</li>
+<li><input checked="" disabled="" type="checkbox"> Tests <code>signer_test.go</code> adaptés à la nouvelle signature + nouveau test fallback role=member</li>
+</ul>
+<h3>Reste à faire pour rendre 100% fonctionnel</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Worker Cloudflare <code>/verify</code> : exposer <code>role</code> + <code>clubId</code> dans la réponse JSON</li>
+<li><input disabled="" type="checkbox"> Worker Cloudflare <code>/verify</code> : hasher en SHA-256 hex le <code>workerToken</code> reçu et matcher contre <code>worker_token_hash</code> en base (pour les licenses générées via <code>/api/admin/licenses</code>)</li>
+<li><input disabled="" type="checkbox"> Bootstrap : créer le premier JWT <code>role=superadmin</code> pour Cédric (en attendant que le Worker l&#39;expose, on peut hardcoder un override côté <code>/api/auth/issue</code> ou utiliser un endpoint de bootstrap protégé par un secret env)</li>
+</ul>
+<h3>Frontend (en attente Étape 2)</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Page <code>pokclock-ops/clubs</code><ul>
+<li>Liste paginée avec colonnes : Name / Plan / Members / Last activity / Status</li>
+<li>Search bar (filtre par nom)</li>
+<li>Bouton &quot;Créer un club&quot; → modale</li>
+<li>Click sur ligne → drill-down <code>/clubs/:id</code></li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Page <code>pokclock-ops/clubs/[id]</code><ul>
+<li>Header : nom, plan, status, créé le</li>
+<li>Onglets : Overview / Members / Licenses / Structures / Audit</li>
+<li>Actions : Suspendre, Changer de plan, Supprimer</li>
+</ul>
+</li>
+</ul>
+<p><strong>Valeur livrée backend</strong> : ✅ toutes les routes admin sont prêtes et testées.
+<strong>Valeur livrée frontend</strong> : ⏳ dépend de l&#39;Étape 2 (skeleton Next.js).</p>
+<hr>
+<h2>Étape 4 — Licenses + Audit (≈ 1 jour)</h2>
+<p>Objectif : support client autonome.</p>
+<ul>
+<li><input disabled="" type="checkbox"> Page <code>pokclock-ops/licenses</code><ul>
+<li>Liste paginée : License key (masquée) / Club / Status / Created / Last seen</li>
+<li>Filtres : status (active/expired/revoked), club, période</li>
+<li>Actions : Revoke (avec confirm), Extend expiration, Reveal key (one-time view + audit)</li>
+<li>Bouton &quot;Generate new license&quot; → modale → POST /api/admin/licenses</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Endpoint <code>POST /api/admin/licenses/:id/revoke</code> — set <code>revoked_at</code>, propager au Worker pour invalider côté D1</li>
+<li><input disabled="" type="checkbox"> Endpoint <code>POST /api/admin/licenses</code> — génère key + HMAC token, retourne au superadmin une seule fois</li>
+<li><input disabled="" type="checkbox"> Page <code>pokclock-ops/audit</code><ul>
+<li>Recherche full-text dans <code>structures_audit</code> (jsonb diff + action + actor)</li>
+<li>Filtres : club, acteur, période, action (CREATE/UPDATE/DELETE)</li>
+<li>Détail ligne : modal avec le diff jsonb formaté</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Endpoint <code>GET /api/admin/audit?club_id=&amp;actor=&amp;from=&amp;to=&amp;q=</code></li>
+</ul>
+<p><strong>Valeur livrée</strong> : tu peux répondre à &quot;qui a changé la structure X et quand&quot;</p>
+<hr>
+<h2>Étape 5 — Polish (≈ 0.5 jour)</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Lien sortant dans sidebar : &quot;Traefik dashboard&quot; → <code>https://traefik.pokclock.com</code> (à exposer derrière CF Access aussi)</li>
+<li><input disabled="" type="checkbox"> Page <code>pokclock-ops/infrastructure</code><ul>
+<li>Status des services Swarm via Docker API (read-only)</li>
+<li>Cert expiration countdown</li>
+<li>Snapshots restic count + dernière date</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> KPIs Stripe sur le Dashboard<ul>
+<li>MRR via Stripe API + cache 1h</li>
+<li>Active subscriptions count</li>
+<li>Link out vers Stripe dashboard</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Activity feed sur le Dashboard<ul>
+<li>Stream des derniers events (license activated, structure created, etc.)</li>
+<li>Source : <code>structures_audit</code> + <code>licenses</code> créées récemment</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> Dark / light mode (toggle dans topbar)</li>
+<li><input disabled="" type="checkbox"> Pages d&#39;erreur custom 404/500</li>
+</ul>
+<p><strong>Valeur livrée</strong> : ops complet et confortable au quotidien.</p>
+<hr>
+<h2>Récap des sous-domaines finaux</h2>
+<table>
+<thead>
+<tr>
+<th>Sous-domaine</th>
+<th>Audience</th>
+<th>Protection</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pokclock.com</code></td>
+<td>Public</td>
+<td>aucune (marketing)</td>
+</tr>
+<tr>
+<td><code>api.pokclock.com</code></td>
+<td>Apps clients + ops.pokclock.com</td>
+<td>JWT RS256 (role-based)</td>
+</tr>
+<tr>
+<td><code>ops.pokclock.com</code></td>
+<td>Cédric (super-admin)</td>
+<td>Cloudflare Access + JWT role=superadmin</td>
+</tr>
+<tr>
+<td><code>grafana.pokclock.com</code></td>
+<td>Cédric</td>
+<td>Cloudflare Access</td>
+</tr>
+<tr>
+<td><code>traefik.pokclock.com</code></td>
+<td>Cédric (Phase 5)</td>
+<td>Cloudflare Access</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Risques identifiés</h2>
+<table>
+<thead>
+<tr>
+<th>Risque</th>
+<th>Probabilité</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Cloudflare Access OAuth Google failed setup</td>
+<td>basse</td>
+<td>doc Cloudflare très claire, fallback identité par PIN possible</td>
+</tr>
+<tr>
+<td>Wildcard cert OVH DNS-01 trop lent à se propager</td>
+<td>basse</td>
+<td>resolver déjà testé en Phase 0.A, fonctionne</td>
+</tr>
+<tr>
+<td>Migration Postgres <code>club_id</code> casse les structures existantes</td>
+<td>moyenne</td>
+<td>écrire la migration en deux étapes (ADD COLUMN nullable, backfill, NOT NULL)</td>
+</tr>
+<tr>
+<td>Worker /verify pas prêt à retourner <code>club_id</code> + <code>role</code></td>
+<td>haute</td>
+<td>étape 3.1 : modifier le Worker D1 d&#39;abord pour exposer ces champs</td>
+</tr>
+<tr>
+<td>Stripe API quota / facturation</td>
+<td>basse</td>
+<td>cache 1h côté ops, lecture seule</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>Bilan 2026-05-25 — fin de session</h2>
+<h3>✅ Étapes 1 à 3 + 4 (presque) complètes</h3>
+<table>
+<thead>
+<tr>
+<th>Étape</th>
+<th>État</th>
+<th>Détails</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>1 — Fondations</strong></td>
+<td>✅</td>
+<td>DNS pokclock.com migré OVH → Cloudflare. Wildcard <code>*.pokclock.com</code> émis via Cloudflare DNS-01 (cert valide jusqu&#39;à 2026-08-23). Resolver Traefik <code>ovh-dns</code> retiré, seul <code>cloudflare-dns</code> actif. Cloudflare Access + Google OAuth + One-time PIN configurés sur <code>ops.pokclock.com</code>.</td>
+</tr>
+<tr>
+<td><strong>2 — Skeleton Next.js</strong></td>
+<td>✅</td>
+<td><code>pokclock-ops</code> repo créé, déployé sur Swarm, 7 routes (Dashboard, Clubs, Licenses, Audit, Observability, Infrastructure, Backups). Image GHCR. Cert wildcard couvre le sous-domaine.</td>
+</tr>
+<tr>
+<td><strong>3 — Backend RBAC</strong></td>
+<td>✅</td>
+<td>Migrations Postgres <code>003_clubs.sql</code> + <code>004_licenses.sql</code> + <code>005_structures_club_id.sql</code>. JWT claims étendus avec <code>Role</code> + <code>ClubID</code>. Middlewares <code>requireRole</code> + <code>requireAnyRole</code>. 11 endpoints <code>/api/admin/*</code> (clubs, licenses, audit). Tests verts. Bootstrap CLI <code>cmd/issue-jwt/</code>.</td>
+</tr>
+<tr>
+<td><strong>4 — Worker /verify</strong></td>
+<td>🟡</td>
+<td>Code écrit, type-check OK, <strong>partiellement déployé</strong>. Migration D1 0002 (ajout <code>role</code> + <code>club_id</code> à <code>licenses</code>) en cours d&#39;application (colonne <code>role</code> créée, vérification de <code>club_id</code> en attente). Code Worker prêt à <code>wrangler deploy</code>.</td>
+</tr>
+</tbody></table>
+<h3>⏳ Reste à reprendre demain</h3>
+<h4>4 — Finaliser Worker <code>/verify</code> (~30 min)</h4>
+<ol>
+<li><strong>Vérifier l&#39;état de la DB D1</strong> sur Cloudflare dashboard → Storage &amp; databases → D1 → <code>pokclock-licenses</code> → Console :<pre><code class="language-sql">SELECT name FROM pragma_table_info(&#39;licenses&#39;) WHERE name IN (&#39;role&#39;, &#39;club_id&#39;);
+</code></pre>
+<ul>
+<li>Si 2 rows → indexes restants : <code>CREATE INDEX IF NOT EXISTS idx_licenses_role ON licenses(role); CREATE INDEX IF NOT EXISTS idx_licenses_club_id ON licenses(club_id);</code></li>
+<li>Si 1 row (<code>role</code> seul) → <code>ALTER TABLE licenses ADD COLUMN club_id TEXT;</code> puis les 2 indexes</li>
+</ul>
+</li>
+<li><strong>Deploy Worker</strong> : <code>cd c:\Users\cédric\source\repos\StackPilot\backend &amp;&amp; npx wrangler deploy</code></li>
+<li><strong>Promouvoir license user en superadmin</strong> :<pre><code class="language-bash">curl -X POST https://pokclock-license.dynamidoxa.workers.dev/admin/promote \
+  -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{&quot;licenseKey&quot;: &quot;POK-XXXX-XXXX-XXXX-XXXX&quot;, &quot;role&quot;: &quot;superadmin&quot;}&#39;
+</code></pre>
+</li>
+<li><strong>Test E2E</strong> : <code>curl /api/auth/issue</code> avec la license → JWT décodé doit montrer <code>role=superadmin</code> + <code>club_id=null</code> venant directement du Worker (et non plus de l&#39;override env <code>SUPERADMIN_LICENSE_KEYS</code>).</li>
+<li>(Optionnel) <strong>Retirer le bootstrap</strong> <code>SUPERADMIN_LICENSE_KEYS</code> du compose pokclock-api une fois validé.</li>
+</ol>
+<h4>5b — Pages CRUD étoffées (~2-3 jours)</h4>
+<ul>
+<li>Page <strong>Clubs</strong> : modale Create / Edit / Delete confirm / boutons Suspend-Unsuspend / drill-down <code>/clubs/[id]</code> avec onglets (Overview, Members, Licenses, Structures, Audit)</li>
+<li>Page <strong>Licenses</strong> : modale Generate (display key + token UNE fois) / bouton Revoke / filtre par club</li>
+<li>Page <strong>Audit</strong> : filtres (clubId, actor, action, date range) / modale View diff JSON formaté</li>
+</ul>
+<h4>5a — Stack monitoring (~1 jour)</h4>
+<ul>
+<li>Déployer Grafana + Loki + Promtail + Prometheus sur le VPS</li>
+<li>Exposer <code>grafana.pokclock.com</code> derrière Cloudflare Access</li>
+<li>Provisioning datasources (Postgres <code>pokclock</code>, Loki, Prometheus)</li>
+<li>4 dashboards : Overview SaaS, Latency &amp; Errors, Containers, Host</li>
+</ul>
+<h4>Cosmétique</h4>
+<ul>
+<li>Cleanup secrets OVH inutilisés : <code>docker secret rm ovh_endpoint ovh_application_key ovh_application_secret ovh_consumer_key</code> sur le VPS</li>
+<li>Dockerfile.backup dédié (combine restic + postgresql16-client pré-installés) pour économiser ~3s d&#39;<code>apk add</code> au boot</li>
+</ul>
+<h3>Commits de la journée</h3>
+<h4><code>cedricleblond35/pokclock-api</code></h4>
+<ul>
+<li><code>0a2f332</code> fix(traefik): switch cert resolver to cloudflare-dns after DNS migration</li>
+<li>(commits précédents de la matinée : RBAC, admin endpoints, issue-jwt CLI, lint fix, API_TOKEN_FILE read)</li>
+</ul>
+<h4><code>cedricleblond35/pokclock-ops</code></h4>
+<ul>
+<li><code>15bf9a7</code> fix(traefik): switch ops router to cloudflare-dns resolver</li>
+<li>(commits précédents : skeleton Next.js, eslint config, public/.gitkeep, HOSTNAME=0.0.0.0)</li>
+</ul>
+<h4><code>cedricleblond35/pokclock-infra</code></h4>
+<ul>
+<li><code>5cabf4d</code> fix(traefik): remove ovh-dns resolver to force wildcard cert via cloudflare</li>
+<li><code>dc12d13</code> ci(infra): remove deploy.yml — Traefik deploy reste manuel</li>
+<li><code>fc5eb07</code> feat(traefik): add Cloudflare DNS-01 resolver for wildcard <code>*.pokclock.com</code></li>
+</ul>
+<h4><code>cedricleblond35/PokClock</code> (sous-dossier <code>backend/</code>)</h4>
+<ul>
+<li><strong>Modifié non commité</strong> (à déployer via <code>wrangler deploy</code>) :<ul>
+<li><code>migrations/0002_role_and_club.sql</code> (NEW)</li>
+<li><code>src/db/queries.ts</code> (LicenseRow + updateLicenseRoleAndClub)</li>
+<li><code>src/routes/verify.ts</code> (réponse JSON inclut role + clubId)</li>
+<li><code>src/routes/admin.ts</code> (accepte role + clubId à la création, nouveau endpoint POST /admin/promote)</li>
+</ul>
+</li>
+</ul>
+<h3>URLs actives en prod</h3>
+<ul>
+<li><a href="https://api.pokclock.com">https://api.pokclock.com</a> → 200 ✓ wildcard cert</li>
+<li><a href="https://ops.pokclock.com">https://ops.pokclock.com</a> → CF Access Google OAuth + Dashboard Next.js</li>
+<li><a href="https://pokclock-license.dynamidoxa.workers.dev">https://pokclock-license.dynamidoxa.workers.dev</a> → Worker (à redéployer demain)</li>
+<li>Cloudflare DNS gère <code>pokclock.com</code> (NS <code>jim.ns.cloudflare.com</code> + <code>liberty.ns.cloudflare.com</code>)</li>
+</ul>
+<hr>
+<h2>Bilan 2026-05-27 — Phases 0.C, 0.D et 0.E livrées</h2>
+<h3>Phase 0.C — Club ops baseline (livrée)</h3>
+<p>Couverture : un admin de club peut tout faire sur son propre club depuis l&#39;app desktop, sans passer par le super-admin.</p>
+<table>
+<thead>
+<tr>
+<th>Sous-phase</th>
+<th>Livré</th>
+<th>Repos / commits</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0.C-α structures partagées</td>
+<td>x</td>
+<td>pokclock-api migrations 005-007, contrats <code>ClubStructure*</code> côté WPF</td>
+</tr>
+<tr>
+<td>0.C-β GET /api/club/info + audit club-scoped</td>
+<td>x</td>
+<td><code>club_audit_info.go</code>, route <code>/api/club/audit</code></td>
+</tr>
+<tr>
+<td>0.C-γ partie 1+2+3 (CRUD licences + members + assignation)</td>
+<td>x</td>
+<td><code>club_licenses.go</code>, <code>club_members.go</code>, migration 007, dialog <code>MemberDialog</code> côté WPF</td>
+</tr>
+<tr>
+<td>0.C-γ partie 3e (super-admin visibilité membres)</td>
+<td>x</td>
+<td><code>GET /api/admin/clubs/:id/members</code>, page ops</td>
+</tr>
+</tbody></table>
+<h3>Phase 0.D — Online registrations + published tournaments (livrée sauf γ.2 simple, γ.3 reporté)</h3>
+<table>
+<thead>
+<tr>
+<th>Sous-phase</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0.D-α tournois publiés + inscriptions anonymes + modération</td>
+<td>x</td>
+<td>migrations 008-011, table <code>published_tournaments</code> + <code>tournament_registrations</code>, emails Resend confirmation/decision, cancel_token magic link</td>
+</tr>
+<tr>
+<td>0.D-α.4 upsert republish + unpublish + auto-sync</td>
+<td>x</td>
+<td>partial unique index (status &lt;&gt; cancelled), auto-update à chaque save WPF</td>
+</tr>
+<tr>
+<td>0.D-β.1 liste joueurs publique + display modes</td>
+<td>x</td>
+<td>migration 012, 4 modes (pseudo / first_initial_last / full_name / hidden) configurés par tournoi</td>
+</tr>
+<tr>
+<td>0.D-β.2 prize structure</td>
+<td>x</td>
+<td>migration 013, <code>PrizeStructureBuilder</code> WPF (distribution standard 1-10 places), affichage React</td>
+</tr>
+<tr>
+<td>0.D-γ.1 barème de points</td>
+<td>x</td>
+<td>migration 014, dialog <code>PointSchemeDialog</code>, types linear / fixed / proportional, affichage React</td>
+</tr>
+<tr>
+<td>0.D-γ.2 publication classement final</td>
+<td>x (intégré à 0.E.4)</td>
+<td>migration 018, dialog <code>PublishResultsDialog</code> WPF, endpoint POST results</td>
+</tr>
+<tr>
+<td>0.D-γ.3 custom formula (cellule de calcul)</td>
+<td>reporté</td>
+<td>scope hors MVP, prévu plus tard</td>
+</tr>
+</tbody></table>
+<h3>Phase 0.E — Comptes joueurs (livrée à 80%, Google OAuth + Calendar restants)</h3>
+<table>
+<thead>
+<tr>
+<th>Sous-phase</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0.E.1.a-d magic link auth + dashboard joueur</td>
+<td>x</td>
+<td>migrations 015-016, cookie <code>pokclock_player</code> Domain=.pokclock.com, JWT audience <code>pokclock-player</code>, pages <code>/joueurs/login</code> et <code>/joueurs/dashboard</code></td>
+</tr>
+<tr>
+<td>0.E.1.e Google OAuth login</td>
+<td>en attente</td>
+<td>nouveau client OAuth GCP à créer, redirect <code>https://api.pokclock.com/api/players/auth/google/callback</code></td>
+</tr>
+<tr>
+<td>0.E.2 inscription via compte (one-click)</td>
+<td>x</td>
+<td>migration 017 <code>player_id</code> sur registrations, endpoints <code>/api/players/me/clubs/:slug/tournaments/:id/register</code> + <code>/registrations/:id</code> cancel/list, composant <code>OneClickRegister</code></td>
+</tr>
+<tr>
+<td>0.E.3 badge inscrit sur liste publique</td>
+<td>x</td>
+<td>enrichissement de <code>/clubs/[slug]/tournois</code> côté React</td>
+</tr>
+<tr>
+<td>0.E.4 résultats finaux + leaderboard club</td>
+<td>x</td>
+<td>migration 018, endpoints POST results admin + GET public results + leaderboard, page <code>/clubs/[slug]/classement</code>, dialog <code>PublishResultsDialog</code> côté WPF (wiring TournamentListView à finaliser côté user)</td>
+</tr>
+<tr>
+<td>0.E.5 sync Google Calendar</td>
+<td>en attente</td>
+<td>OAuth Calendar scope séparé, hook event création/suppression à l&#39;inscription</td>
+</tr>
+</tbody></table>
+<h3>Config VPS à appliquer avant prochain deploy</h3>
+<ul>
+<li>Env <code>PLAYER_COOKIE_DOMAIN=.pokclock.com</code> à set sur le service Swarm <code>pokclock-api</code></li>
+<li>Env <code>API_BASE_URL=https://api.pokclock.com</code> (a un défaut sain mais explicit ne coûte rien)</li>
+<li>Migrations 014-018 à appliquer au prochain boot de l&#39;API (goose au démarrage)</li>
+</ul>
+<h3>Reste WPF (toi sur Windows)</h3>
+<ul>
+<li>Push depuis Windows : 4 commits non poussés <code>2991223</code> (filtre cancelled) + <code>0d04fca</code> (barème points) + <code>dfe42a2</code> (dialog publish results) + <code>f944050</code> (fix CI workflow PokClock rename)</li>
+<li>Wire <code>PublishResultsDialog</code> dans <code>TournamentListView</code> (bouton &quot;Publier classement&quot; sur tournoi)</li>
+<li>Rebuild + release Velopack</li>
+</ul>
+<h3>Reste fonctionnel pour clore Phase 0.E</h3>
+<ul>
+<li>0.E.1.e Google OAuth login player (~0.5 jour quand le client OAuth GCP est prêt)</li>
+<li>0.E.5 Google Calendar sync (~1-1.5 jour, OAuth Calendar scope + hook event auto à register/cancel)</li>
+</ul>
+<hr>
+<h2>Update 2026-05-27 (suite) — Phase 0.E.1.e + 0.E.5 + 0.F + RGPD livrées</h2>
+<h3>Phase 0.E.1.e Google OAuth login</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Backend handlers /api/players/auth/google/start + /callback</td>
+<td>x</td>
+<td>state CSRF via cookie HttpOnly+Lax 10min, scope <code>openid email profile</code></td>
+</tr>
+<tr>
+<td>UPSERT player par google_id puis email</td>
+<td>x</td>
+<td>Auto-link compte magic-link existant si même email</td>
+</tr>
+<tr>
+<td>Frontend bouton &quot;Continuer avec Google&quot; sur /joueurs/login</td>
+<td>x</td>
+<td>Logo SVG officiel multi-couleur</td>
+</tr>
+<tr>
+<td>Env vars GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET_FILE</td>
+<td>x</td>
+<td>Secret Swarm prioritaire</td>
+</tr>
+</tbody></table>
+<p><strong>À set côté VPS</strong> : créer un secret Swarm <code>google_oauth_client_secret</code> + ajouter <code>GOOGLE_OAUTH_CLIENT_ID</code> en env. Si manquant, le bouton renvoie sur <code>/joueurs/login?error=google_oauth_disabled</code>.</p>
+<h3>Phase 0.E.5 Sync Google Calendar</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Migrations 022 player_google_tokens + 023 google_event_id</td>
+<td>x</td>
+<td>Tokens en clair (réseau privé Swarm), refresh auto</td>
+</tr>
+<tr>
+<td>OAuth Calendar séparé du login (scope calendar.events)</td>
+<td>x</td>
+<td>access_type=offline + prompt=consent pour refresh_token</td>
+</tr>
+<tr>
+<td>Client googlecal (Insert/Update/Delete + RevokeToken)</td>
+<td>x</td>
+<td>Wrapper léger Calendar API v3 primary calendar</td>
+</tr>
+<tr>
+<td>Service calendarSync avec auto-refresh access_token</td>
+<td>x</td>
+<td>Refresh quand &lt; 1min de marge avant expiration</td>
+</tr>
+<tr>
+<td>Hooks lifecycle : create at register, update at confirm, delete at reject/cancel</td>
+<td>x</td>
+<td>Fire-and-forget goroutines, échec n&#39;impacte pas l&#39;op DB</td>
+</tr>
+<tr>
+<td>Frontend GoogleCalendarPanel sur dashboard</td>
+<td>x</td>
+<td>Connect/disconnect, status, notices ?calendar_connected/error</td>
+</tr>
+</tbody></table>
+<p><strong>Client OAuth</strong> : peut être le même que pour login Google. Ajouter le redirect URI <code>https://api.pokclock.com/api/players/me/google-calendar/callback</code> au client existant + ajouter le scope <code>https://www.googleapis.com/auth/calendar.events</code> dans le OAuth consent screen.</p>
+<h3>Phase 0.F Adhésions joueurs + tournois réservés</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Migration 020 player_club_memberships + 021 audience</td>
+<td>x</td>
+<td>Status pending/active/rejected/revoked, audience public/members_only</td>
+</tr>
+<tr>
+<td>Backend endpoints joueur : list / join / leave</td>
+<td>x</td>
+<td>Re-trigger pending si row existante rejected/revoked</td>
+</tr>
+<tr>
+<td>Backend admin : list + approve / reject / revoke</td>
+<td>x</td>
+<td>Modération via WPF Mon club &gt; MEMBRES JOUEURS</td>
+</tr>
+<tr>
+<td>Register endpoints refusent les members_only sans membership</td>
+<td>x</td>
+<td>Anonymes 403 + comptes sans membership active 403</td>
+</tr>
+<tr>
+<td>Frontend public : 4 cas dans aside selon (audience, auth, membership)</td>
+<td>x</td>
+<td>CTA Me connecter / Adhésion requise / OneClick / Form anonyme</td>
+</tr>
+<tr>
+<td>Frontend dashboard : section Mes clubs avec status + bouton quitter</td>
+<td>x</td>
+<td></td>
+</tr>
+<tr>
+<td>WPF onglet MEMBRES JOUEURS distinct de MEMBRES staff</td>
+<td>x</td>
+<td>DataGrid + boutons Approuver / Refuser / Exclure</td>
+</tr>
+<tr>
+<td>WPF checkbox &quot;Réservé aux membres&quot; dans PublishSettingsDialog</td>
+<td>x</td>
+<td>Audience auto-passé via BuildPublishRequestAsync</td>
+</tr>
+</tbody></table>
+<h3>RGPD : suppression compte joueur</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DELETE /api/players/me avec transaction d&#39;anonymisation</td>
+<td>x</td>
+<td>tournament_registrations + tournament_results anonymisés, magic_links delete, players delete</td>
+</tr>
+<tr>
+<td>Email best-effort sendAccountDeleted</td>
+<td>x</td>
+<td>Trace utilisateur post-suppression</td>
+</tr>
+<tr>
+<td>Migration 019 + goroutine cleanup magic_links toutes les 6h</td>
+<td>x</td>
+<td>Évite que la table gonfle indéfiniment</td>
+</tr>
+<tr>
+<td>Frontend bouton &quot;Supprimer mon compte&quot; en zone dangereuse</td>
+<td>x</td>
+<td>Confirmation inline (premier clic explique les conséquences)</td>
+</tr>
+</tbody></table>
+<h3>Tables Postgres au 2026-05-27 (post 0.E + 0.F + 0.E.5)</h3>
+<p><code>structures</code>, <code>structures_audit</code>, <code>clubs</code>, <code>licenses</code>, <code>members</code>,
+<code>published_tournaments</code>, <code>tournament_registrations</code>, <code>point_schemes</code>,
+<code>players</code>, <code>player_magic_links</code>, <code>tournament_results</code>,
+<strong><code>player_club_memberships</code></strong>, <strong><code>player_google_tokens</code></strong>.</p>
+<p>Détails complets : voir <code>~/workspace/pokclock-api/docs/DATABASE_SCHEMA.md</code>.</p>
+
+
+<footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
+  <p>pokclock-api · Documentation auto-générée depuis les .md du repo.</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  hljs.highlightAll();
+</script>
+</body>
+</html>

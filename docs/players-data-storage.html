@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockage des données joueurs — pokclock-api</title>
+<meta name="description" content="Où vivent les données des comptes joueurs (Postgres, cookie, backups R2, Resend) et conformité RGPD.">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+
+<div class="layout">
+
+<aside>
+  <a href="index.html" class="brand">pokclock-api
+    <small>Documentation</small>
+  </a>
+
+  <nav>
+    <ol>
+      <li><a href="index.html">Référence technique principale</a></li>
+      <li><a href="database-schema.html">DB Schema</a></li>
+      <li class="active"><a href="players-data-storage.html">Joueurs & RGPD</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B</a></li>
+    </ol>
+  </nav>
+
+  <div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.8rem;color:var(--fg-muted);">
+    <p>Sources MD :</p>
+    <ul style="list-style:none;padding:0;margin:0;">
+      <li><a href="DATABASE_SCHEMA.md">DATABASE_SCHEMA.md</a></li>
+      <li><a href="PLAYERS_DATA_STORAGE.md">PLAYERS_DATA_STORAGE.md</a></li>
+    </ul>
+    <p style="margin-top:0.5rem;"><a href="https://github.com/cedricleblond35/pokclock-api">Repo GitHub</a></p>
+  </div>
+</aside>
+
+<main id="top">
+
+<div class="banner">
+  <h1>Stockage des données joueurs</h1>
+  <p>Où vivent les données des comptes joueurs (Postgres, cookie, backups R2, Resend) et conformité RGPD.</p>
+</div>
+
+<h1>Stockage des données joueurs</h1>
+<blockquote>
+<p>Phase 0.E + RGPD. Référence technique sur où vivent les données des comptes joueurs PokClock, et comment elles sont protégées, sauvegardées et supprimables.</p>
+</blockquote>
+<p>À jour au <strong>2026-05-27</strong>.</p>
+<hr>
+<h2>1. Vue d&#39;ensemble</h2>
+<table>
+<thead>
+<tr>
+<th>Catégorie</th>
+<th>Localisation</th>
+<th>Hébergeur</th>
+<th>Région</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Tables Postgres (profils, magic links, inscriptions, résultats)</td>
+<td>Service Swarm <code>pokclock-api_postgres</code></td>
+<td>VPS OVH <code>vps-eb94174b</code> (54.38.243.50)</td>
+<td>France</td>
+</tr>
+<tr>
+<td>JWT session joueur</td>
+<td>Cookie HttpOnly côté navigateur</td>
+<td>Aucun (stateless)</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Backups DB chiffrés</td>
+<td>Bucket <code>pokclock-backups</code></td>
+<td>Cloudflare R2</td>
+<td>WEUR (Western Europe)</td>
+</tr>
+<tr>
+<td>Emails transactionnels</td>
+<td>Resend HTTP API</td>
+<td>Resend</td>
+<td>Ireland eu-west-1</td>
+</tr>
+<tr>
+<td>Logs applicatifs</td>
+<td>stdout container (Docker logs rotation)</td>
+<td>VPS OVH</td>
+<td>France</td>
+</tr>
+</tbody></table>
+<p>Toutes les données restent dans l&#39;UE. Aucun transfert hors-UE.</p>
+<hr>
+<h2>2. Tables Postgres concernées</h2>
+<h3>2.1 <code>players</code></h3>
+<p>Le compte joueur principal.</p>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td>Identifiant interne, utilisé dans tous les FK</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>text UNIQUE</td>
+<td>En clair (nécessaire pour les magic links). Indexé en <code>lower(email)</code>.</td>
+</tr>
+<tr>
+<td><code>google_id</code></td>
+<td>text UNIQUE NULL</td>
+<td><code>sub</code> Google OAuth (Phase 0.E.1.e, non encore actif)</td>
+</tr>
+<tr>
+<td><code>first_name</code>, <code>last_name</code></td>
+<td>text</td>
+<td>Vide par défaut, alimenté quand le joueur édite son profil</td>
+</tr>
+<tr>
+<td><code>email_verified</code></td>
+<td>bool</td>
+<td>Passe à <code>true</code> après consommation du premier magic link</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text</td>
+<td><code>active</code> / <code>banned</code> / <code>deleted</code> (soft-delete réservé aux bans admin)</td>
+</tr>
+<tr>
+<td><code>created_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td>Audit basique</td>
+</tr>
+</tbody></table>
+<p>Migration : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/015_players.sql"><code>015_players.sql</code></a>.</p>
+<h3>2.2 <code>player_magic_links</code></h3>
+<p>Tokens de connexion passwordless.</p>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>token</code></td>
+<td>text PK</td>
+<td>32 bytes random base64url (256 bits d&#39;entropie)</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>text</td>
+<td>Cible du lien, pas de FK vers <code>players</code> (le compte peut ne pas exister encore)</td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>timestamptz</td>
+<td><code>now() + 15 min</code> à la création</td>
+</tr>
+<tr>
+<td><code>used_at</code></td>
+<td>timestamptz NULL</td>
+<td>Marqué au verify, bloque la réutilisation</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Migration : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/016_player_magic_links.sql"><code>016_player_magic_links.sql</code></a>.</p>
+<p><strong>Cleanup</strong> : la table est purgée toutes les 6h par la goroutine <code>StartMagicLinkCleanup</code> (cf. <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/cleanup.go"><code>cleanup.go</code></a>) avec <code>DELETE WHERE used_at IS NOT NULL OR expires_at &lt; now()</code>. Migration <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/019_player_magic_links_cleanup.sql"><code>019_player_magic_links_cleanup.sql</code></a> fait un nettoyage one-shot au déploiement.</p>
+<h3>2.3 <code>tournament_registrations.player_id</code></h3>
+<p>FK ajouté en Phase 0.E.2 pour lier une inscription à un compte joueur authentifié. Nullable (compat avec les inscriptions anonymes Phase 0.D-α). <code>ON DELETE SET NULL</code> : si le joueur est supprimé, le <code>player_id</code> est nullifié mais la registration historique reste.</p>
+<p>Migration : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/017_tournament_registrations_player_id.sql"><code>017_tournament_registrations_player_id.sql</code></a>.</p>
+<h3>2.4 <code>tournament_results.player_id</code></h3>
+<p>FK ajouté en Phase 0.E.4 pour lier un classement final à un compte. Nullable, <code>ON DELETE SET NULL</code>. Permet d&#39;agréger le leaderboard cross-tournois par <code>player_id</code> quand disponible, fallback nom sinon.</p>
+<p>Migration : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/018_tournament_results.sql"><code>018_tournament_results.sql</code></a>.</p>
+<h3>2.5 <code>player_club_memberships</code> (Phase 0.F)</h3>
+<p>Adhésion d&#39;un joueur à un club, prérequis pour s&#39;inscrire à un tournoi <code>members_only</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>player_id</code></td>
+<td>uuid FK CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>club_id</code></td>
+<td>uuid FK CASCADE</td>
+<td></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>text</td>
+<td><code>pending</code> / <code>active</code> / <code>rejected</code> / <code>revoked</code></td>
+</tr>
+<tr>
+<td><code>requested_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+<tr>
+<td><code>moderated_by_license</code>, <code>moderated_at</code>, <code>moderation_reason</code></td>
+<td>nullable</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Cascade : si le joueur supprime son compte, ses memberships disparaissent (CASCADE) — pas d&#39;anonymisation nécessaire, c&#39;est juste une relation.</p>
+<p>Migration : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/020_player_club_memberships.sql"><code>020_player_club_memberships.sql</code></a>.</p>
+<h3>2.6 <code>player_google_tokens</code> (Phase 0.E.5)</h3>
+<p>Tokens OAuth pour synchroniser les inscriptions tournoi dans l&#39;agenda Google du joueur.</p>
+<table>
+<thead>
+<tr>
+<th>Colonne</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>player_id</code></td>
+<td>uuid PK FK CASCADE</td>
+<td>1-to-1 avec player</td>
+</tr>
+<tr>
+<td><code>access_token</code></td>
+<td>text</td>
+<td>Court terme (~1h), stocké en clair</td>
+</tr>
+<tr>
+<td><code>refresh_token</code></td>
+<td>text</td>
+<td>Long terme, stocké en clair</td>
+</tr>
+<tr>
+<td><code>token_type</code></td>
+<td>text DEFAULT &#39;Bearer&#39;</td>
+<td></td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>timestamptz</td>
+<td>Auto-refresh quand expiré</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>text</td>
+<td><code>calendar.events</code></td>
+</tr>
+<tr>
+<td><code>connected_at</code>, <code>updated_at</code></td>
+<td>timestamptz</td>
+<td></td>
+</tr>
+</tbody></table>
+<p><strong>Stockage en clair</strong> : la DB Postgres est sur réseau privé Swarm, l&#39;attaquant qui y accède a déjà accès à tout le reste. Si on veut une couche supplémentaire plus tard (défense en profondeur), pgcrypto + secret KMS.</p>
+<p><strong>Suppression compte</strong> : CASCADE supprime la row, <strong>mais</strong> le token reste valide côté Google jusqu&#39;à expiration (refresh) ou révocation explicite. Pour révoquer côté Google aussi : voir endpoint <code>DELETE /api/players/me/google-calendar</code> qui révoque avant de supprimer la row.</p>
+<p>Migration : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/022_player_google_tokens.sql"><code>022_player_google_tokens.sql</code></a>.</p>
+<h3>2.7 <code>tournament_registrations.google_event_id</code> (Phase 0.E.5)</h3>
+<p>Colonne nullable ajoutée pour lier une inscription à l&#39;event Google Calendar correspondant. Permet update (au confirm) et delete (au cancel/reject).</p>
+<p>Migration : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/023_tournament_registrations_google_event_id.sql"><code>023_tournament_registrations_google_event_id.sql</code></a>.</p>
+<hr>
+<h2>3. Session côté navigateur (cookie JWT)</h2>
+<p>Pas de table de sessions côté serveur. La session est un JWT signé RS256 transporté dans un cookie.</p>
+<table>
+<thead>
+<tr>
+<th>Attribut</th>
+<th>Valeur</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Nom</td>
+<td><code>pokclock_player</code></td>
+</tr>
+<tr>
+<td>Contenu</td>
+<td>JWT RS256 (claims <code>pid</code>, <code>email</code>, <code>aud=pokclock-player</code>, <code>exp</code>, <code>sub</code>, <code>iat</code>)</td>
+</tr>
+<tr>
+<td><code>HttpOnly</code></td>
+<td><code>true</code> (JS du navigateur ne peut pas le lire)</td>
+</tr>
+<tr>
+<td><code>Secure</code></td>
+<td><code>true</code> (HTTPS uniquement)</td>
+</tr>
+<tr>
+<td><code>SameSite</code></td>
+<td><code>None</code> (autorise les requêtes cross-subdomain <code>pokclock.com</code> ↔ <code>api.pokclock.com</code>)</td>
+</tr>
+<tr>
+<td><code>Domain</code></td>
+<td><code>.pokclock.com</code> en prod (env <code>PLAYER_COOKIE_DOMAIN</code>), vide en dev</td>
+</tr>
+<tr>
+<td><code>Path</code></td>
+<td><code>/</code></td>
+</tr>
+<tr>
+<td>TTL</td>
+<td>30 jours</td>
+</tr>
+</tbody></table>
+<p>Conséquences :</p>
+<ul>
+<li><strong>Pas de stockage serveur de la session</strong>, rien à supprimer côté DB quand un user se déconnecte</li>
+<li><strong>Le logout supprime juste le cookie</strong> (efface <code>Set-Cookie</code> avec <code>Max-Age=-1</code>)</li>
+<li><strong>Une session ne peut pas être révoquée à la volée</strong> sans changer la clé de signature globale. Trade-off accepté pour la simplicité ; le TTL de 30 jours limite l&#39;exposition.</li>
+<li>Si un joueur supprime son compte, le JWT reste cryptographiquement valide jusqu&#39;à expiration, mais tous les endpoints <code>/api/players/me/*</code> retournent <code>410 Gone</code> ou <code>404</code> parce que <code>players.id</code> n&#39;existe plus.</li>
+</ul>
+<p>Signature : la même paire RSA que les JWT desktop (cf. <code>auth.Signer</code>), avec un <code>aud</code> différent (<code>pokclock-player</code> vs <code>pokclock-desktop</code>). Le middleware <code>playerAuthMiddleware</code> rejette tout token qui n&#39;a pas l&#39;audience <code>pokclock-player</code>.</p>
+<hr>
+<h2>4. Backups</h2>
+<pre><code>┌──────────────────────────────┐         daily 03:00 UTC          ┌─────────────────────────┐
+│ pokclock-api_postgres        │  ─── pg_dump | restic backup ──&gt; │ Cloudflare R2           │
+│ Service Swarm sur VPS OVH    │                                  │ pokclock-backups (WEUR) │
+│ Volume Docker persistant     │                                  │ Chiffrement AES-256     │
+└──────────────────────────────┘                                  └─────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>Outil</strong> : <code>restic</code> dans un container dédié <code>pokclock-api_backup</code> qui tourne dans le même stack Swarm</li>
+<li><strong>Fréquence</strong> : quotidienne (03:00 UTC)</li>
+<li><strong>Rétention</strong> : 7 jours / 4 semaines / 6 mois</li>
+<li><strong>Chiffrement</strong> : AES-256 via restic, clé stockée comme secret Swarm (<code>restic_password</code>), JAMAIS dans le repo Git</li>
+<li><strong>Vérification</strong> : <code>restic check</code> exécuté chaque semaine</li>
+</ul>
+<p>Les backups contiennent les tables <code>players</code>, <code>player_magic_links</code>, <code>tournament_registrations</code>, <code>tournament_results</code>, etc. <strong>Implication RGPD</strong> : si un joueur supprime son compte, les snapshots existants conservent ses données pendant la fenêtre de rétention (max 6 mois). Au-delà, les anciens snapshots expirent automatiquement.</p>
+<hr>
+<h2>5. Emails (Resend)</h2>
+<p>Les magic links et confirmations sont envoyés via <a href="https://resend.com">Resend</a> (provider transactionnel, Ireland eu-west-1).</p>
+<table>
+<thead>
+<tr>
+<th>Email</th>
+<th>Déclencheur</th>
+<th>Contenu joueur transmis à Resend</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Magic link login</td>
+<td><code>POST /api/players/auth/magic-link</code></td>
+<td>Email + lien avec token</td>
+</tr>
+<tr>
+<td>Confirmation compte supprimé</td>
+<td><code>DELETE /api/players/me</code></td>
+<td>Email + first_name (optionnel)</td>
+</tr>
+<tr>
+<td>Inscription tournoi confirmée</td>
+<td>Admin valide depuis WPF</td>
+<td>Email + nom + détail tournoi + cancel_token</td>
+</tr>
+<tr>
+<td>Inscription tournoi refusée</td>
+<td>Admin reject depuis WPF</td>
+<td>Email + nom + motif optionnel</td>
+</tr>
+</tbody></table>
+<p>Resend conserve les emails envoyés ~30 jours dans son log pour debug. Domaine d&#39;envoi : <code>noreply@pokclock.com</code> (DKIM + SPF + DMARC verified).</p>
+<hr>
+<h2>6. Ce qui n&#39;est PAS stocké</h2>
+<ul>
+<li><strong>Pas de mot de passe</strong> (auth passwordless via magic link)</li>
+<li><strong>Pas d&#39;adresse IP côté <code>players</code></strong> (les logs Echo loguent l&#39;IP mais sans liaison user, rotation Docker logs)</li>
+<li><strong>Pas de User-Agent stocké</strong></li>
+<li><strong>Pas de credit card / paiement</strong> (pas encore implémenté ; quand Stripe sera branché, les tokens Stripe seront stockés, pas les numéros)</li>
+<li><strong>Pas de tracking ni cookies analytics côté site public</strong> sur les pages <code>/joueurs/*</code></li>
+<li><strong>Pas de géolocalisation</strong></li>
+</ul>
+<hr>
+<h2>7. Droit à l&#39;effacement (RGPD Art. 17)</h2>
+<p>Endpoint : <code>DELETE /api/players/me</code> (authentifié par cookie).</p>
+<h3>Transaction côté backend</h3>
+<pre><code class="language-sql">BEGIN;
+
+-- 1. Anonymise les inscriptions historiques (préserve les capacités tournois)
+UPDATE tournament_registrations
+   SET first_name = &#39;Anonyme&#39;,
+       last_name  = &#39;&#39;,
+       email      = &#39;&#39;,
+       phone      = NULL,
+       player_id  = NULL
+ WHERE player_id = :player_id;
+
+-- 2. Anonymise les résultats historiques (préserve les leaderboards)
+UPDATE tournament_results
+   SET first_name = &#39;Anonyme&#39;,
+       last_name  = &#39;&#39;,
+       player_id  = NULL
+ WHERE player_id = :player_id;
+
+-- 3. Supprime tous les magic links pendants liés à l&#39;email
+DELETE FROM player_magic_links WHERE lower(email) = lower(:email);
+
+-- 4. Supprime le compte
+DELETE FROM players WHERE id = :player_id;
+
+COMMIT;
+</code></pre>
+<h3>Effets</h3>
+<ul>
+<li><strong>Compte</strong> : supprimé définitivement</li>
+<li><strong>Inscriptions passées et futures</strong> : anonymisées. Les positions dans les classements historiques restent (sans nom identifiable), les compteurs de joueurs sur les tournois passés restent corrects.</li>
+<li><strong>Résultats</strong> : anonymisés idem. Le leaderboard club préserve la structure (rangs, points) sans le nom.</li>
+<li><strong>Memberships clubs</strong> : CASCADE delete via FK (table <code>player_club_memberships</code>)</li>
+<li><strong>Tokens Google Calendar</strong> : CASCADE delete via FK (table <code>player_google_tokens</code>). <strong>Limitation</strong> : les tokens restent valides côté Google jusqu&#39;à leur expiration naturelle ou révocation explicite (le DELETE me ne les révoque pas via l&#39;API Google pour rester rapide en transaction). Pour révoquer côté Google, l&#39;utilisateur peut le faire via <a href="https://myaccount.google.com/permissions">security.google.com</a>.</li>
+<li><strong>Events Google Calendar existants</strong> : pas supprimés (le compte est déjà détruit, on ne peut plus appeler l&#39;API Calendar avec son token). Les events tournoi resteront dans son agenda. L&#39;utilisateur peut les supprimer manuellement.</li>
+<li><strong>Cookie de session</strong> : cleared via <code>Set-Cookie</code> avec <code>Max-Age=-1</code> dans la réponse</li>
+<li><strong>JWT existant</strong> : cryptographiquement valide mais inutilisable (player_id introuvable en DB)</li>
+<li><strong>Email de confirmation</strong> : envoyé best-effort via Resend pour traçabilité</li>
+</ul>
+<h3>Limitations connues</h3>
+<ul>
+<li><strong>Backups</strong> : un snapshot R2 de la veille contient encore les données du joueur. Expirent automatiquement selon la politique de rétention (max 6 mois). Pas de purge ciblée des backups (techniquement possible avec restic mais pas implémenté).</li>
+<li><strong>Logs Resend</strong> : Resend conserve ~30 jours les emails envoyés. Le joueur peut faire une demande directement à Resend si besoin.</li>
+<li><strong>Logs Docker</strong> : les logs applicatifs peuvent contenir des emails dans les messages de log (ex: <code>slog.Info(&quot;send register confirmation failed&quot;, &quot;email&quot;, in.Email)</code>). Rotation Docker par défaut limite la rétention à quelques jours.</li>
+</ul>
+<hr>
+<h2>8. Schéma global</h2>
+<pre><code>┌────────────────────────────────────────────────────────────────┐
+│ Navigateur joueur (pokclock.com)                               │
+│   - Cookie pokclock_player (JWT, HttpOnly, 30j)                │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │ HTTPS avec credentials
+                       ▼
+┌────────────────────────────────────────────────────────────────┐
+│ VPS OVH vps-eb94174b (France)                                  │
+│                                                                │
+│  ┌─────────────────────────────┐                               │
+│  │ pokclock-api_api (Echo Go)  │                               │
+│  │   - playerAuthMiddleware    │                               │
+│  │   - handlers /api/players/* │                               │
+│  │   - magicLinkCleanup /6h    │                               │
+│  └──────────────┬──────────────┘                               │
+│                 │                                              │
+│  ┌──────────────▼──────────────┐    ┌──────────────────────┐   │
+│  │ pokclock-api_postgres       │    │ pokclock-api_backup  │   │
+│  │   - players                 │    │   - restic daily     │   │
+│  │   - player_magic_links      │ ─&gt; │   - chiffré AES-256  │   │
+│  │   - tournament_registrations│    └──────────┬───────────┘   │
+│  │   - tournament_results      │               │               │
+│  │   - clubs, licenses, ...    │               │               │
+│  └─────────────────────────────┘               │               │
+└────────────────────────────────────────────────┼───────────────┘
+                                                 │
+                                                 ▼
+                                  ┌──────────────────────────────┐
+                                  │ Cloudflare R2 (WEUR)         │
+                                  │   bucket pokclock-backups    │
+                                  │   rétention 7d / 4w / 6m     │
+                                  └──────────────────────────────┘
+</code></pre>
+<hr>
+<h2>9. Voir aussi</h2>
+<ul>
+<li><a href="https://github.com/cedricleblond35/pokclock-api/blob/main/README.md"><code>README.md</code></a> section &quot;Endpoints&quot; pour la liste complète des routes joueurs</li>
+<li><a href="../../PHASE-0B-OPS-ROADMAP.md"><code>PHASE-0B-OPS-ROADMAP.md</code></a> section &quot;Bilan 2026-05-27&quot; pour le contexte des phases</li>
+<li>Migrations Phase 0.E : 015 à 019 dans <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/db/migrations/"><code>internal/db/migrations/</code></a></li>
+<li>Handlers : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_auth.go"><code>players_auth.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_me.go"><code>players_me.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_registrations.go"><code>players_registrations.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/cleanup.go"><code>cleanup.go</code></a></li>
+<li><a href="https://pokclock.com/fr/legal">Politique de confidentialité publique</a> (à rédiger côté <code>pokclock-react</code> à partir de ce document)</li>
+</ul>
+
+
+<footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
+  <p>pokclock-api · Documentation auto-générée depuis les .md du repo.</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  hljs.highlightAll();
+</script>
+</body>
+</html>

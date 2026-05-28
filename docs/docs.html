@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Documentation — pokclock-api</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<aside>
+  <a href="docs.html" class="brand">pokclock-api
+    <small>Documentation</small>
+  </a>
+  <nav>
+    <ol>
+      <li class="active"><a href="docs.html">Accueil</a></li>
+      <li><a href="index.html">Référence technique principale</a></li>
+      <li><a href="database-schema.html">DB Schema</a></li>
+      <li><a href="players-data-storage.html">Joueurs & RGPD</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B</a></li>
+    </ol>
+  </nav>
+</aside>
+<main id="top">
+<div class="banner">
+  <h1>Documentation pokclock-api</h1>
+  <p>Backend Go/Echo pour PokClock — cloud features, comptes joueurs, tournois publiés, leaderboards, RGPD.</p>
+  <div class="meta">
+    <span><strong>Repo</strong> cedricleblond35/pokclock-api</span>
+    <span><strong>Live</strong> <a href="https://api.pokclock.com/api/health">api.pokclock.com</a></span>
+  </div>
+</div>
+
+<h2>Pages disponibles</h2>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-top:1.5rem;">
+
+  <a href="index.html" style="text-decoration:none;color:inherit;">
+    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);transition:border-color 0.15s;">
+      <h3 style="margin-top:0;color:var(--accent);">Référence technique principale</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Vue d'ensemble, architecture, cas d'usage, stack, sécurité, roadmap. Le doc historique avec sommaire et diagrammes Mermaid.</p>
+      <p style="font-size:0.8rem;color:var(--fg-dim);">📄 index.html</p>
+    </div>
+  </a>
+
+  <a href="database-schema.html" style="text-decoration:none;color:inherit;">
+    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
+      <h3 style="margin-top:0;color:var(--accent);">Schéma base de données</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Inventaire complet des 13 tables Postgres, leurs colonnes, relations, et qui les consomme par endpoint.</p>
+      <p style="font-size:0.8rem;color:var(--fg-dim);">📄 database-schema.html</p>
+    </div>
+  </a>
+  <a href="players-data-storage.html" style="text-decoration:none;color:inherit;">
+    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
+      <h3 style="margin-top:0;color:var(--accent);">Stockage des données joueurs</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Où vivent les données des comptes joueurs (Postgres, cookie, backups R2, Resend) et conformité RGPD.</p>
+      <p style="font-size:0.8rem;color:var(--fg-dim);">📄 players-data-storage.html</p>
+    </div>
+  </a>
+  <a href="phase-0b-bilan.html" style="text-decoration:none;color:inherit;">
+    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
+      <h3 style="margin-top:0;color:var(--accent);">Phase 0.B — Bilan ops dashboard</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G livrées en mai 2026.</p>
+      <p style="font-size:0.8rem;color:var(--fg-dim);">📄 phase-0b-bilan.html</p>
+    </div>
+  </a>
+
+</div>
+
+<h2 style="margin-top:3rem;">Liens utiles</h2>
+<ul>
+  <li><a href="https://api.pokclock.com/api/health">Healthcheck API live</a></li>
+  <li><a href="https://api.pokclock.com/.well-known/jwks.json">JWKS public (clé de signature JWT)</a></li>
+  <li><a href="https://github.com/cedricleblond35/pokclock-api">Code source sur GitHub</a></li>
+  <li><a href="https://pokclock.com">Site public PokClock</a></li>
+</ul>
+
+<footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
+  <p>pokclock-api · 2026-05-28</p>
+</footer>
+</main>
+</div>
+</body>
+</html>
