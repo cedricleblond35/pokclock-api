@@ -32,12 +32,22 @@ func autoLinkPlayerToClubs(ctx context.Context, pool *pgxpool.Pool, logger *slog
 	sum := sha256.Sum256([]byte(email))
 	hashHex := hex.EncodeToString(sum[:])
 
+	// Source 1 : snapshot local_players des tournois publies (Phase 0.H)
+	// Source 2 : roster permanent du club pousse depuis WPF (Phase 0.J)
 	rows, err := pool.Query(ctx,
-		`SELECT DISTINCT t.club_id
-		 FROM published_tournaments t,
-		      jsonb_array_elements(t.local_players) p
-		 WHERE p->>'emailHash' = $1
-		   AND t.status <> 'cancelled'`,
+		`SELECT DISTINCT club_id FROM (
+		    SELECT t.club_id
+		    FROM published_tournaments t,
+		         jsonb_array_elements(t.local_players) p
+		    WHERE p->>'emailHash' = $1
+		      AND t.status <> 'cancelled'
+		    UNION
+		    SELECT c.id AS club_id
+		    FROM clubs c,
+		         jsonb_array_elements(c.member_roster) m
+		    WHERE m->>'emailHash' = $1
+		      AND c.status = 'active'
+		 ) AS matches`,
 		hashHex,
 	)
 	if err != nil {

@@ -136,6 +136,11 @@ func Mount(e *echo.Echo, d Deps) {
 	clubAuditH := &clubAuditHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/audit", clubAuditH.search)
 
+	// Phase 0.J : roster permanent des membres pousse depuis WPF.
+	// Permet l'auto-link Phase 0.H avant publication d'un tournoi.
+	clubRosterH := &clubRosterHandler{pool: d.Pool, logger: d.Logger}
+	clubGroup.PUT("/roster", clubRosterH.upsertRoster)
+
 	// Phase 0.F : modération des adhésions joueur ↔ club côté admin.
 	clubMembershipsH := &clubMembershipsHandler{pool: d.Pool, logger: d.Logger}
 	clubGroup.GET("/memberships", clubMembershipsH.list)
