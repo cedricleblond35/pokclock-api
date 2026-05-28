@@ -103,7 +103,7 @@ flowchart LR
 <p>Accède à <code>ops.pokclock.com</code>. Vue cross-clubs : créer/suspendre des clubs, émettre des licenses, auditer toutes les actions sur structures.</p>
 
 <div class="mermaid">
-flowchart LR
+flowchart TB
   SA(["Super-admin"])
 
   subgraph Clubs ["Gestion clubs"]
@@ -250,7 +250,7 @@ sequenceDiagram
 <p>Le dealer utilise un sous-mode de WPF (license <code>role=member</code>) sur son poste, ou la <strong>PWA dealer</strong> sur tablette connectée au LAN local du club. Il enregistre les éliminations, demande des resits, déclenche le hand-for-hand.</p>
 
 <div class="mermaid">
-flowchart LR
+flowchart TB
   D(["Dealer"])
 
   subgraph Live ["Pendant le tournoi"]
@@ -283,7 +283,7 @@ La PWA dealer est servie par le Kestrel embarqué de WPF (port 5050) en LAN uniq
 <p>Quelqu'un qui découvre PokClock via <code>pokclock.com</code>. Peut consulter les pages marketing et les tournois publiés d'un club, s'inscrire sans créer de compte.</p>
 
 <div class="mermaid">
-flowchart LR
+flowchart TB
   V(["Visiteur anonyme"])
 
   subgraph Marketing ["Marketing"]
@@ -443,9 +443,17 @@ journey
       lineColor: '#8b949e',
       secondaryColor: '#3fb950',
       tertiaryColor: '#d29922',
+      fontSize: '15px',
     },
-    flowchart: { curve: 'basis', padding: 20 },
-    sequence: { actorMargin: 50, boxMargin: 10 },
+    flowchart: {
+      curve: 'basis',
+      padding: 20,
+      nodeSpacing: 50,
+      rankSpacing: 60,
+      htmlLabels: true,
+    },
+    sequence: { actorMargin: 60, boxMargin: 12, messageFontSize: 13 },
+    journey: { taskFontSize: 12, sectionFontSize: 14 },
   });
 </script>
 </body>

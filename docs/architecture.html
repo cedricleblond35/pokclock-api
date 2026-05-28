@@ -759,9 +759,17 @@ Le re-trigger <code>rejected → pending</code> permet à un joueur de retenter 
       lineColor: '#8b949e',
       secondaryColor: '#3fb950',
       tertiaryColor: '#d29922',
+      fontSize: '15px',
     },
-    flowchart: { curve: 'basis', padding: 20 },
-    sequence: { actorMargin: 50, boxMargin: 10 },
+    flowchart: {
+      curve: 'basis',
+      padding: 20,
+      nodeSpacing: 50,
+      rankSpacing: 60,
+      htmlLabels: true,
+    },
+    sequence: { actorMargin: 60, boxMargin: 12, messageFontSize: 13 },
+    journey: { taskFontSize: 12, sectionFontSize: 14 },
   });
   hljs.highlightAll();
 </script>

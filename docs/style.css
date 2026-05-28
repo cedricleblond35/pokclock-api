@@ -196,6 +196,17 @@ pre:hover .copy-btn { opacity: 1; }
   padding: 1rem;
   margin: 1rem 0;
   text-align: center;
+  /* Permet de scroller horizontalement si le diagramme est plus large que
+     le conteneur (les flowchart LR avec beaucoup de noeuds par ex). */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.mermaid svg {
+  /* Conserve une lisibilité minimale même quand le diagramme est large.
+     Sans ce min-width, mermaid compresse aggressivement et les labels
+     deviennent illisibles. */
+  min-width: 600px;
+  height: auto !important;
 }
 
 /* Tables */
