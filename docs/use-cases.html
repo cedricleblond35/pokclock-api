@@ -56,11 +56,11 @@
 
 <div class="mermaid">
 flowchart LR
-  SA([🔐 Super-admin<br/>Cédric])
-  CA([🃏 Admin de club<br/>TD propriétaire])
-  D([🎲 Dealer<br/>croupier])
-  V([👤 Visiteur<br/>anonyme])
-  P([⭐ Joueur<br/>authentifié])
+  SA(["🔐 Super-admin<br/>Cédric"])
+  CA(["🃏 Admin de club<br/>TD propriétaire"])
+  D(["🎲 Dealer<br/>croupier"])
+  V(["👤 Visiteur<br/>anonyme"])
+  P(["⭐ Joueur<br/>authentifié"])
 
   SA -- "ops.pokclock.com<br/>CF Access + JWT superadmin" --> Ops["Ops dashboard"]
   CA -- "WPF desktop<br/>+ web /joueurs si compte" --> WPF["App PokClock + web"]
@@ -104,24 +104,24 @@ flowchart LR
 
 <div class="mermaid">
 flowchart LR
-  SA([Super-admin])
+  SA(["Super-admin"])
 
   subgraph Clubs ["Gestion clubs"]
-    UC1[Créer un club]
-    UC2[Suspendre / réactiver]
-    UC3[Soft-delete un club]
-    UC4[Lister les membres d'un club]
+    UC1["Créer un club"]
+    UC2["Suspendre / réactiver"]
+    UC3["Soft-delete un club"]
+    UC4["Lister les membres d'un club"]
   end
 
   subgraph Lic ["Gestion licenses"]
-    UC5[Émettre une license<br/>POK-XXXX-XXXX-XXXX-XXXX]
-    UC6[Révoquer une license]
-    UC7[Lister licenses cross-clubs]
+    UC5["Émettre une license<br/>POK-XXXX-XXXX-XXXX-XXXX"]
+    UC6["Révoquer une license"]
+    UC7["Lister licenses cross-clubs"]
   end
 
   subgraph Audit ["Observabilité"]
-    UC8[Rechercher dans l'audit log<br/>par actor / action / date]
-    UC9[Suivre métriques infra<br/>Grafana (Phase 5a)]
+    UC8["Rechercher dans l'audit log<br/>par actor / action / date"]
+    UC9["Suivre métriques infra<br/>Grafana (Phase 5a)"]
   end
 
   SA --> UC1 & UC2 & UC3 & UC4
@@ -159,35 +159,35 @@ flowchart LR
 
 <div class="mermaid">
 flowchart TB
-  CA([Admin de club])
+  CA(["Admin de club"])
 
   subgraph Setup ["Setup club"]
-    UC1[Voir info du club + statut]
-    UC2[Toggle inscriptions online]
-    UC3[Gérer membres staff]
-    UC4[Générer licenses pour son équipe]
-    UC5[Assigner license ↔ membre]
+    UC1["Voir info du club + statut"]
+    UC2["Toggle inscriptions online"]
+    UC3["Gérer membres staff"]
+    UC4["Générer licenses pour son équipe"]
+    UC5["Assigner license ↔ membre"]
   end
 
   subgraph Configs ["Configuration métier"]
-    UC6[Configurer barème de points<br/>linear / fixed / proportional / custom]
-    UC7[Créer une saison de championnat]
-    UC8[Publier une structure de tournoi partagée]
+    UC6["Configurer barème de points<br/>linear / fixed / proportional / custom"]
+    UC7["Créer une saison de championnat"]
+    UC8["Publier une structure de tournoi partagée"]
   end
 
   subgraph Tour ["Cycle tournoi"]
-    UC9[Créer un tournoi local<br/>(blinds, buy-in, joueurs)]
-    UC10[Publier en ligne<br/>(audience, display mode, saison)]
-    UC11[Modérer les inscriptions<br/>(confirm / reject)]
-    UC12[Approuver les demandes<br/>d'adhésion au club]
-    UC13[Publier le classement final<br/>+ calcul points auto]
+    UC9["Créer un tournoi local<br/>(blinds, buy-in, joueurs)"]
+    UC10["Publier en ligne<br/>(audience, display mode, saison)"]
+    UC11["Modérer les inscriptions<br/>(confirm / reject)"]
+    UC12["Approuver les demandes<br/>d'adhésion au club"]
+    UC13["Publier le classement final<br/>+ calcul points auto"]
   end
 
   subgraph Mob ["Pendant le tournoi"]
-    UC14[Lancer l'horloge + audio]
-    UC15[Gérer les tables<br/>équilibrage + HFH]
-    UC16[Enregistrer les éliminations]
-    UC17[Lancer la PWA dealer<br/>(LAN local)]
+    UC14["Lancer l'horloge + audio"]
+    UC15["Gérer les tables<br/>équilibrage + HFH"]
+    UC16["Enregistrer les éliminations"]
+    UC17["Lancer la PWA dealer<br/>(LAN local)"]
   end
 
   CA --> UC1 & UC2 & UC3 & UC4 & UC5
@@ -251,15 +251,15 @@ sequenceDiagram
 
 <div class="mermaid">
 flowchart LR
-  D([Dealer])
+  D(["Dealer"])
 
   subgraph Live ["Pendant le tournoi"]
-    UC1[Démarrer / pauser l'horloge]
-    UC2[Avancer / reculer un niveau]
-    UC3[Enregistrer une élimination]
-    UC4[Demander Hand-for-Hand]
-    UC5[Lancer un Rebuy / Add-on]
-    UC6[Marquer un break]
+    UC1["Démarrer / pauser l'horloge"]
+    UC2["Avancer / reculer un niveau"]
+    UC3["Enregistrer une élimination"]
+    UC4["Demander Hand-for-Hand"]
+    UC5["Lancer un Rebuy / Add-on"]
+    UC6["Marquer un break"]
   end
 
   D --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6
@@ -284,25 +284,25 @@ La PWA dealer est servie par le Kestrel embarqué de WPF (port 5050) en LAN uniq
 
 <div class="mermaid">
 flowchart LR
-  V([Visiteur anonyme])
+  V(["Visiteur anonyme"])
 
   subgraph Marketing ["Marketing"]
-    UC1[Découvrir le produit<br/>features / pricing / témoignages]
-    UC2[Voir les tarifs]
-    UC3[Télécharger l'app desktop<br/>(Setup.exe Velopack)]
+    UC1["Découvrir le produit<br/>features / pricing / témoignages"]
+    UC2["Voir les tarifs"]
+    UC3["Télécharger l'app desktop<br/>(Setup.exe Velopack)"]
   end
 
   subgraph Clubs ["Pages clubs"]
-    UC4[Voir les tournois publiés<br/>d'un club /clubs/slug/tournois]
-    UC5[Détail d'un tournoi]
-    UC6[Voir le classement du club<br/>cumul cross-tournois]
-    UC7[Voir les saisons / championnats]
-    UC8[Voir le leaderboard d'une saison]
+    UC4["Voir les tournois publiés<br/>d'un club /clubs/slug/tournois"]
+    UC5["Détail d'un tournoi"]
+    UC6["Voir le classement du club<br/>cumul cross-tournois"]
+    UC7["Voir les saisons / championnats"]
+    UC8["Voir le leaderboard d'une saison"]
   end
 
   subgraph Reg ["Inscription anonyme"]
-    UC9[S'inscrire via formulaire<br/>prénom/nom/email/phone]
-    UC10[Annuler via magic link email]
+    UC9["S'inscrire via formulaire<br/>prénom/nom/email/phone"]
+    UC10["Annuler via magic link email"]
   end
 
   V --> UC1 & UC2 & UC3
@@ -333,33 +333,33 @@ flowchart LR
 
 <div class="mermaid">
 flowchart TB
-  P([Joueur authentifié])
+  P(["Joueur authentifié"])
 
   subgraph Compte ["Gestion compte"]
-    UC1[Se connecter via magic link]
-    UC2[Se connecter via Google OAuth]
-    UC3[Voir / éditer son profil]
-    UC4[Supprimer son compte<br/>(RGPD avec anonymisation)]
-    UC5[Se déconnecter]
+    UC1["Se connecter via magic link"]
+    UC2["Se connecter via Google OAuth"]
+    UC3["Voir / éditer son profil"]
+    UC4["Supprimer son compte<br/>(RGPD avec anonymisation)"]
+    UC5["Se déconnecter"]
   end
 
   subgraph Insc ["Inscriptions tournois"]
-    UC6[S'inscrire en un clic<br/>(profil préfilléprefilled)]
-    UC7[Voir ses inscriptions à venir]
-    UC8[Voir son historique]
-    UC9[Annuler une inscription]
+    UC6["S'inscrire en un clic<br/>(profil préfillé)"]
+    UC7["Voir ses inscriptions à venir"]
+    UC8["Voir son historique"]
+    UC9["Annuler une inscription"]
   end
 
   subgraph Clubs ["Adhésions clubs (Phase 0.F)"]
-    UC10[Demander adhésion à un club]
-    UC11[Voir ses clubs + statut]
-    UC12[Quitter un club]
+    UC10["Demander adhésion à un club"]
+    UC11["Voir ses clubs + statut"]
+    UC12["Quitter un club"]
   end
 
   subgraph Cal ["Sync agenda (Phase 0.E.5)"]
-    UC13[Connecter Google Calendar]
-    UC14[Events auto à l'inscription]
-    UC15[Déconnecter l'agenda]
+    UC13["Connecter Google Calendar"]
+    UC14["Events auto à l'inscription"]
+    UC15["Déconnecter l'agenda"]
   end
 
   P --> UC1 & UC2 & UC3 & UC4 & UC5

@@ -457,7 +457,7 @@ Trois cas selon (audience, joueur authentifié, membership) :
 
 <div class="mermaid">
 flowchart TB
-  Start([Visiteur sur /clubs/slug/tournois/id]) --> Auth{Connecté ?}
+  Start(["Visiteur sur /clubs/slug/tournois/id"]) --> Auth{Connecté ?}
 
   Auth -- non --> Aud1{audience ?}
   Aud1 -- public --> Form["Formulaire prénom/nom/email/phone"]
@@ -472,13 +472,13 @@ flowchart TB
   Memb -- pending --> Wait["Banner 'Adhésion en attente'"]
   Memb -- aucune ou rejected/revoked --> Join["Bouton Demander l'adhésion"]
 
-  Form --> SubA[POST /public/clubs/:slug/.../register]
-  OneClick --> SubB[POST /api/players/me/clubs/:slug/.../register]
-  Join --> JoinPost[POST /api/players/me/clubs/:slug/join]
+  Form --> SubA["POST /public/clubs/:slug/.../register"]
+  OneClick --> SubB["POST /api/players/me/clubs/:slug/.../register"]
+  Join --> JoinPost["POST /api/players/me/clubs/:slug/join"]
 
-  SubA --> DB[(INSERT tournament_registrations<br/>player_id NULL)]
-  SubB --> DB2[(INSERT tournament_registrations<br/>player_id set)]
-  JoinPost --> DBM[(INSERT player_club_memberships<br/>status=pending)]
+  SubA --> DB[("INSERT tournament_registrations<br/>player_id NULL")]
+  SubB --> DB2[("INSERT tournament_registrations<br/>player_id set")]
+  JoinPost --> DBM[("INSERT player_club_memberships<br/>status=pending")]
 
   DB --> Email["Resend email confirmation<br/>+ cancel_token magic link"]
   DB2 --> Cal["calendarSync.OnRegistration<br/>(fire-and-forget)"]
