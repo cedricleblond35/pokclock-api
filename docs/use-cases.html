@@ -40,6 +40,10 @@
       <li><a href="#actor-anon">👤 Visiteur anonyme</a></li>
       <li><a href="#actor-player">⭐ Joueur authentifié</a></li>
     </ul>
+    <p style="font-size:0.75rem;color:var(--fg-muted);text-transform:uppercase;letter-spacing:0.05em;margin:1rem 0 0.5rem;">Scénarios</p>
+    <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;line-height:1.7;">
+      <li><a href="#scenario-autolink">🔗 Auto-link joueur (Phase 0.H)</a></li>
+    </ul>
   </div>
 </aside>
 
@@ -423,6 +427,132 @@ journey
 
 <h3>Données effacées au DELETE /me (RGPD)</h3>
 <p>Voir <a href="players-data-storage.html#section-7-droit-%C3%A0-l-effacement-rgpd-art-17">PLAYERS_DATA_STORAGE § 7</a> pour le détail.</p>
+</section>
+
+<!-- ============================================================
+     SCÉNARIO : AUTO-LINK COMPTE JOUEUR ↔ CLUBS (Phase 0.H)
+============================================================ -->
+<section id="scenario-autolink">
+<h2>🔗 Scénario — Auto-link compte joueur via emailHash (Phase 0.H)</h2>
+
+<p>
+<strong>Problème résolu</strong> : un club gère ses joueurs habitués dans son app PokClock WPF (saisie manuelle ou import CSV avec emails). Plus tard, ces joueurs créent leur compte cloud sur <code>pokclock.com</code>. Sans Phase 0.H, l'admin doit valider manuellement chaque demande d'adhésion. Avec 0.H, le matching se fait automatiquement par email — l'admin valide juste d'un clic.
+</p>
+
+<h3>Acteurs impliqués</h3>
+<ul>
+  <li><strong>Admin du club</strong> (TD propriétaire) — saisit les Players dans WPF avec leur email, publie ses tournois</li>
+  <li><strong>Joueur</strong> (Jean Dupont, jean@example.com) — habitué du club, joue plusieurs fois par an, n'avait pas encore de compte cloud</li>
+  <li><strong>App WPF</strong> — calcule le hash SHA-256 de l'email au moment du publish, l'inclut dans le snapshot</li>
+  <li><strong>Backend pokclock-api</strong> — exécute le matching au moment de la création de compte</li>
+</ul>
+
+<h3>Flow narratif (du club au joueur connecté)</h3>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant TD as Admin TD
+  participant WPF as App PokClock WPF
+  participant DB as Postgres
+  participant Jean as Jean Dupont
+  participant Web as pokclock.com
+
+  rect rgba(210,153,34,0.08)
+    note over TD,WPF: T0 — Le club gère ses habitués (rien de nouveau)
+    TD->>WPF: Saisie Player "Jean Dupont"<br/>email = jean@example.com
+    TD->>WPF: Inscrit Jean au tournoi Hebdo Jeudi
+  end
+
+  rect rgba(31,111,235,0.08)
+    note over WPF,DB: T1 — Publish du tournoi avec hash
+    TD->>WPF: Click "Publier en ligne"
+    WPF->>WPF: Pour chaque joueur local avec email:<br/>emailHash = sha256(lower(trim(email))) hex
+    WPF->>DB: POST tournament, local_players = <br/>[{firstName, lastName, emailHash}]
+    note over DB: emailHash stocké en JSONB.<br/>L'email en clair n'arrive jamais cloud
+  end
+
+  rect rgba(63,185,80,0.08)
+    note over Jean,Web: T2 — Plus tard, Jean crée son compte (volontaire)
+    Jean->>Web: pokclock.com/fr/joueurs/login
+    Jean->>Web: Saisit jean@example.com<br/>(ou Continuer avec Google)
+    Web->>DB: INSERT players (email=jean@example.com)
+    Web->>Web: Émet JWT joueur, pose cookie
+  end
+
+  rect rgba(124,58,237,0.08)
+    note over Web,DB: T3 — Backend matche automatiquement
+    Web->>Web: autoLinkPlayerToClubs (goroutine)
+    Web->>Web: hash = sha256(jean@example.com)
+    Web->>DB: SELECT DISTINCT t.club_id<br/>FROM published_tournaments t,<br/>jsonb_array_elements(t.local_players) p<br/>WHERE p->>'emailHash' = hash
+    DB-->>Web: [club du TD]
+    Web->>DB: INSERT player_club_memberships<br/>(player=Jean, club=X, status=pending)<br/>ON CONFLICT DO NOTHING
+  end
+
+  rect rgba(245,159,11,0.08)
+    note over TD,WPF: T4 — L'admin valide d'un clic
+    TD->>WPF: Mon club > MEMBRES JOUEURS
+    WPF->>DB: GET memberships status=pending
+    DB-->>WPF: [{player=Jean Dupont, email=jean@example.com, status=pending}]
+    note over TD: TD reconnaît Jean — son habitué
+    TD->>WPF: Click Approuver
+    WPF->>DB: UPDATE membership SET status=active
+  end
+
+  rect rgba(63,185,80,0.12)
+    note over Jean,Web: T5 — Jean accède aux tournois privés
+    Jean->>Web: Visite /clubs/cprm-test/tournois
+    Jean->>Web: Voit un tournoi members_only
+    Web->>DB: Verify membership active = oui
+    Web-->>Jean: Bouton "S'inscrire en un clic" actif
+  end
+</div>
+
+<h3>États successifs côté DB</h3>
+
+<table>
+  <thead><tr><th>Étape</th><th>player_club_memberships (Jean, club_X)</th><th>État perçu par Jean</th></tr></thead>
+  <tbody>
+    <tr><td>Avant T2</td><td>(row inexistante)</td><td>Pas de compte</td></tr>
+    <tr><td>T2 fin</td><td>(row inexistante)</td><td>Compte créé, aucun club</td></tr>
+    <tr><td>T3 fin</td><td>status = <code>pending</code></td><td>Banner sur dashboard "Demande en attente"</td></tr>
+    <tr><td>T4 fin</td><td>status = <code>active</code></td><td>Membre actif, accès tournois members_only</td></tr>
+  </tbody>
+</table>
+
+<h3>Variantes &amp; edge cases</h3>
+
+<table>
+  <thead><tr><th>Situation</th><th>Comportement</th></tr></thead>
+  <tbody>
+    <tr><td>Jean est connu de <strong>plusieurs clubs</strong> (a joué dans 3 clubs différents)</td><td>3 demandes <code>pending</code> créées simultanément, une par club. Chaque admin valide indépendamment.</td></tr>
+    <tr><td>Jean avait déjà une <code>membership active</code> au club X avant 0.H</td><td><code>ON CONFLICT (player_id, club_id) DO NOTHING</code> → aucune modif. L'active reste active.</td></tr>
+    <tr><td>Jean a une <code>membership rejected</code> ou <code>revoked</code></td><td>Idem : pas écrasé. L'admin avait dit non, on respecte. Jean peut re-demander manuellement via "Rejoindre le club".</td></tr>
+    <tr><td>Le Player WPF n'a pas d'email</td><td>Pas d'<code>emailHash</code> calculé → skip silencieux. Jean devra demander l'adhésion manuellement.</td></tr>
+    <tr><td>Tournoi du club annulé (<code>status=cancelled</code>)</td><td>Exclu de la recherche. Le matching ne se déclenche pas via un tournoi annulé.</td></tr>
+    <tr><td>Hash ne matche aucun club</td><td>Pas de membership créée. Jean a juste un compte cloud "libre", peut s'inscrire en un clic aux tournois publics.</td></tr>
+  </tbody>
+</table>
+
+<h3>Routes API impliquées</h3>
+<table>
+  <thead><tr><th>Acteur</th><th>Endpoint</th><th>Effet en lien avec auto-link</th></tr></thead>
+  <tbody>
+    <tr><td>WPF admin</td><td><code>POST /api/club/tournaments</code></td><td>Pousse <code>local_players[].emailHash</code> dans le UPSERT</td></tr>
+    <tr><td>Joueur</td><td><code>GET /api/players/auth/magic-link/verify</code></td><td>Hook <code>autoLinkPlayerToClubs</code> après UPSERT player</td></tr>
+    <tr><td>Joueur</td><td><code>GET /api/players/auth/google/callback</code></td><td>Hook idem</td></tr>
+    <tr><td>Admin</td><td><code>GET /api/club/memberships?status=pending</code></td><td>Voit les demandes auto-créées comme n'importe quelle demande</td></tr>
+    <tr><td>Admin</td><td><code>POST /api/club/memberships/:id/approve</code></td><td>Active la membership</td></tr>
+  </tbody>
+</table>
+
+<h3>Voir aussi</h3>
+<ul>
+  <li><a href="architecture.html#autolink">Architecture § 13 — Auto-link emailHash</a> pour le détail technique (algo hash, sequence diagram)</li>
+  <li><a href="database-schema.html#player_club_memberships">Schéma DB § player_club_memberships</a></li>
+  <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a> pour le contexte privacy</li>
+</ul>
+
 </section>
 
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">

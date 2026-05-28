@@ -366,11 +366,50 @@ Couverture : un admin de club peut tout faire sur son propre club depuis l'app d
 | Migration 019 + goroutine cleanup magic_links toutes les 6h | x | Évite que la table gonfle indéfiniment |
 | Frontend bouton "Supprimer mon compte" en zone dangereuse | x | Confirmation inline (premier clic explique les conséquences) |
 
-### Tables Postgres au 2026-05-27 (post 0.E + 0.F + 0.E.5)
+### Tables Postgres au 2026-05-28 (post 0.E + 0.F + 0.E.5 + 0.G + 0.H)
 
 `structures`, `structures_audit`, `clubs`, `licenses`, `members`,
-`published_tournaments`, `tournament_registrations`, `point_schemes`,
-`players`, `player_magic_links`, `tournament_results`,
-**`player_club_memberships`**, **`player_google_tokens`**.
+`published_tournaments` (avec colonnes `audience`, `season_id`, `local_players` enrichi `emailHash`),
+`tournament_registrations`, `point_schemes`, `players`,
+`player_magic_links`, `tournament_results`,
+**`player_club_memberships`**, **`player_google_tokens`**,
+**`seasons`** (Phase 0.G).
 
-Détails complets : voir `~/workspace/pokclock-api/docs/DATABASE_SCHEMA.md`.
+Détails complets : voir [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md).
+
+---
+
+## Update 2026-05-28 — Phase 0.G (saisons) + Phase 0.H (auto-link)
+
+### Phase 0.G Saisons / championnats
+
+| Item | Livré | Notes |
+|---|---|---|
+| Migration 025 `seasons` + 026 `published_tournaments.season_id` nullable | x | CHECK `ends_at > starts_at`, UNIQUE `(club_id, slug)` |
+| Backend CRUD `/api/club/seasons` + publish accepte `seasonId` | x | Verify season belongs to club au publish |
+| Public `/public/clubs/:slug/seasons` + `:season_slug` leaderboard scopé | x | Filtre archives, agrégation `GROUP BY lower(first_name, last_name)` filtrée par `season_id` |
+| Frontend `/clubs/[slug]/saisons` + `/saisons/[season_slug]` | x | Status badges actif / à venir / clôturé |
+| WPF onglet `Mon club > SAISONS` avec CRUD + dropdown saison dans PublishSettingsDialog | x | SeasonDialog code-behind avec date pickers + status combo |
+
+### Phase 0.H Auto-link compte joueur ↔ clubs via emailHash
+
+Hooks aux nouveaux comptes joueurs (magic link verify + Google OAuth callback). Le backend cherche l'email du nouveau player dans tous les `published_tournaments.local_players[].emailHash` et crée des `player_club_memberships` status `pending` pour les clubs matchés. L'admin valide ensuite d'un clic depuis WPF.
+
+| Item | Livré | Notes |
+|---|---|---|
+| `internal/api/players_autolink.go` : helper `autoLinkPlayerToClubs(playerID, email)` | x | Calcule sha256(lower(trim(email))) hex, query JSONB containment |
+| Hook fire-and-forget dans `verifyMagicLink` | x | `go autoLinkPlayerToClubs(context.Background(), ...)` |
+| Hook fire-and-forget dans `upsertPlayerFromGoogle` | x | Idem pour le flow Google OAuth |
+| WPF : `LocalPlayerRecord` gagne `EmailHash` nullable | x | sha256 calculé dans `BuildLocalPlayersListAsync` |
+| WPF : `HashEmailOrNull` miroir strict de l'algo Go | x | UTF-8 bytes → SHA-256 → hex lowercase |
+| Frontend dashboard joueur : banner explicatif sur les demandes auto | x | Section "Mes clubs" affiche un message sky quand status=pending |
+
+**Privacy / RGPD** :
+- L'email lui-même ne traverse jamais le réseau cloud côté WPF → API
+- Seul le hash SHA-256 one-way est inclus dans le JSONB `local_players` déjà poussé au publish
+- Aucune nouvelle PII transmise au backend par rapport à l'avant-0.H
+
+**Limitation connue** :
+- Les comptes joueurs créés AVANT le déploiement de 0.H ne sont pas rétro-linkés (les anciens snapshots ne contiennent pas `emailHash`)
+- Pour réparer : rebuild + republish les tournois existants depuis WPF version 0.H, OU ajouter une commande oneshot backend qui scanne et match (à coder si besoin)
+- Le match ne fonctionne que si le club a publié au moins UN tournoi avec ce joueur dans `local_players` (donc avec `show_players=true` au moment du publish, ou avec `localPlayers` poussé de toute façon)

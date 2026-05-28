@@ -280,7 +280,7 @@ Handler : [`internal/api/structures.go`](../internal/api/structures.go) (writes)
 | `blinds_summary` | jsonb NULL | Résumé blinds pour affichage public |
 | `show_players` | bool NOT NULL DEFAULT false | Ajouté en 012 |
 | `players_display_mode` | text NOT NULL DEFAULT `hidden` | `hidden` / `pseudo` / `first_initial_last` / `full_name`. Ajouté en 012 |
-| `local_players` | jsonb NOT NULL DEFAULT `[]` | Snapshot des joueurs locaux poussés par WPF. Ajouté en 012 |
+| `local_players` | jsonb NOT NULL DEFAULT `[]` | Snapshot des joueurs locaux poussés par WPF. Ajouté en 012. Schéma : `[{firstName, lastName, nickname?, emailHash?}]`. `emailHash` (Phase 0.H) = sha256(lower(trim(email))) hex, sert au backend pour auto-link les comptes joueurs cloud créés ensuite. L'email lui-même n'est jamais transmis (RGPD) |
 | `prize_structure` | jsonb NULL | Payouts calculés côté WPF. Ajouté en 013 |
 | `audience` | text NOT NULL DEFAULT `public` CHECK | `public` ou `members_only`. Ajouté en 021 (Phase 0.F) |
 | `published_by_license` | text NOT NULL | License_key du publisher |
@@ -520,8 +520,9 @@ Migration : 020.
 | Club admin | `POST /api/club/memberships/:id/reject` (pending → rejected) | x | x |
 | Club admin | `POST /api/club/memberships/:id/revoke` (active → revoked) | x | x |
 | Joueur authentifié | `POST /api/players/me/clubs/:slug/tournaments/:id/register` (EXISTS check sur status='active') | x | |
+| Backend auto (Phase 0.H) | Hook après `verifyMagicLink` ou Google callback : `autoLinkPlayerToClubs` cherche `emailHash` dans `local_players` et INSERT pending pour chaque club matché | x | x |
 
-Handler : [`internal/api/players_memberships.go`](../internal/api/players_memberships.go), [`internal/api/club_memberships.go`](../internal/api/club_memberships.go), [`internal/api/players_registrations.go`](../internal/api/players_registrations.go).
+Handler : [`internal/api/players_memberships.go`](../internal/api/players_memberships.go), [`internal/api/club_memberships.go`](../internal/api/club_memberships.go), [`internal/api/players_registrations.go`](../internal/api/players_registrations.go), [`internal/api/players_autolink.go`](../internal/api/players_autolink.go).
 
 ---
 

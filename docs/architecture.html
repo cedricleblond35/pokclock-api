@@ -48,6 +48,7 @@
       <li><a href="#uml">10. UML entités</a></li>
       <li><a href="#registration-state">11. États inscription</a></li>
       <li><a href="#membership-state">12. États adhésion</a></li>
+      <li><a href="#autolink">13. Auto-link emailHash (0.H)</a></li>
     </ul>
   </div>
 </aside>
@@ -739,6 +740,102 @@ stateDiagram-v2
 <p>
 Le re-trigger <code>rejected → pending</code> permet à un joueur de retenter sa demande après refus (peut-être que l'admin avait des questions, le joueur peut re-poster). De même <code>revoked → pending</code> permet la réintégration après exclusion.
 </p>
+</section>
+
+<!-- ============================================================
+     13. AUTO-LINK EMAILHASH (Phase 0.H)
+============================================================ -->
+<section id="autolink">
+<h2>13. Auto-link compte joueur ↔ clubs via emailHash (Phase 0.H)</h2>
+<p>
+Quand un joueur crée son compte cloud (magic link ou Google OAuth), le backend cherche son email dans les snapshots <code>local_players</code> des tournois publiés et crée automatiquement des demandes d'adhésion <code>pending</code> pour les clubs où il était déjà connu localement par son club via son app WPF.
+</p>
+<p>
+<strong>Privacy</strong> : l'email lui-même n'est jamais transmis par l'app WPF. Seul son hash SHA-256 (one-way) est inclus dans le JSONB <code>local_players[].emailHash</code>. Le backend compare hash contre hash.
+</p>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant TD as Admin TD<br/>(WPF)
+  participant WPF as PokClock WPF
+  participant API as pokclock-api
+  participant DB as Postgres
+  participant Joueur as Joueur Jean
+
+  rect rgba(210,153,34,0.05)
+    note right of TD: Phase 1 — Le club connaît Jean (avant Phase 0.H)
+    TD->>WPF: Saisit Player "Jean Dupont"<br/>email=jean@example.com<br/>(local SQLite, jamais cloud)
+    TD->>WPF: Inscrit Jean au tournoi "Hebdo du jeudi"
+    TD->>WPF: Click "Publier en ligne"<br/>(show_players=true)
+  end
+
+  rect rgba(31,111,235,0.05)
+    note right of WPF: Phase 2 — Publish avec emailHash
+    WPF->>WPF: BuildLocalPlayersListAsync<br/>HashEmailOrNull("jean@example.com")<br/>= "abc123..." (sha256 hex)
+    WPF->>API: POST /api/club/tournaments<br/>local_players=[{firstName:"Jean", lastName:"Dupont", emailHash:"abc123..."}]
+    API->>DB: UPSERT published_tournaments<br/>local_players JSONB inclut emailHash
+    note over DB: L'email "jean@example.com" n'apparaît jamais<br/>côté backend cloud
+  end
+
+  rect rgba(63,185,80,0.05)
+    note right of Joueur: Phase 3 — Jean crée son compte (plus tard)
+    Joueur->>API: GET /joueurs/login → saisit jean@example.com
+    API->>DB: INSERT players (email='jean@example.com')
+    API->>API: Émet JWT joueur, pose cookie
+    par autoLinkPlayerToClubs goroutine fire-and-forget
+      API->>API: hash = sha256("jean@example.com") = "abc123..."
+      API->>DB: SELECT DISTINCT t.club_id<br/>FROM published_tournaments t,<br/>jsonb_array_elements(t.local_players) p<br/>WHERE p->>'emailHash' = $hash AND status != cancelled
+      DB-->>API: [club_X]
+      API->>DB: INSERT player_club_memberships<br/>(player_id=Jean, club_id=X, status=pending)<br/>ON CONFLICT DO NOTHING
+    end
+    API-->>Joueur: 302 → /joueurs/dashboard
+  end
+
+  rect rgba(124,58,237,0.05)
+    note right of TD: Phase 4 — L'admin valide la demande auto
+    TD->>WPF: Ouvre Mon club > MEMBRES JOUEURS
+    WPF->>API: GET /api/club/memberships?status=pending
+    API-->>WPF: [{player: "Jean Dupont", email: "jean@example.com", status: pending}]
+    TD->>WPF: Click Approuver
+    WPF->>API: POST /api/club/memberships/:id/approve
+    API->>DB: UPDATE player_club_memberships<br/>SET status='active'
+    note over Joueur: Jean peut maintenant s'inscrire<br/>aux tournois members_only du club
+  end
+</div>
+
+<h3>Conditions du match</h3>
+<ul>
+  <li>Le club a publié au moins <strong>un tournoi avec Jean dans <code>local_players</code></strong> (donc avec <code>show_players=true</code> ou <code>localPlayers</code> poussé de toute façon, ce qui est le défaut)</li>
+  <li>Le Player WPF a son champ <code>Email</code> renseigné</li>
+  <li>L'app WPF est en version 0.H ou ultérieure (les versions antérieures ne calculaient pas l'<code>emailHash</code>)</li>
+  <li>Le joueur crée son compte cloud avec le <strong>même email</strong> que celui du Player local du club (case-insensitive, trimmé)</li>
+</ul>
+
+<h3>Algorithme du hash (miroir Go ↔ C#)</h3>
+
+<table>
+  <thead><tr><th>Étape</th><th>Go (backend)</th><th>C# (WPF)</th></tr></thead>
+  <tbody>
+    <tr><td>1. Normalize</td><td><code>strings.ToLower(strings.TrimSpace(email))</code></td><td><code>email.Trim().ToLowerInvariant()</code></td></tr>
+    <tr><td>2. Encode UTF-8</td><td>bytes directs</td><td><code>Encoding.UTF8.GetBytes(normalized)</code></td></tr>
+    <tr><td>3. SHA-256</td><td><code>sha256.Sum256(bytes)</code></td><td><code>SHA256.Create().ComputeHash(bytes)</code></td></tr>
+    <tr><td>4. Hex lowercase</td><td><code>hex.EncodeToString(sum[:])</code></td><td><code>Convert.ToHexString(bytes).ToLowerInvariant()</code></td></tr>
+  </tbody>
+</table>
+
+<p>
+Test rapide : <code>sha256("test@example.com")</code> = <code>973dfe463ec85785f5f95af5ba3906eedb2d931c24e69824a89ea65dba4e813b</code>. Si tu obtiens autre chose en C# ou en Go, le match auto-link cassera.
+</p>
+
+<h3>Limitations</h3>
+<ul>
+  <li><strong>Comptes joueurs créés avant 0.H</strong> : pas rétro-linkés. Pour réparer, l'admin peut republier ses tournois (l'UPSERT sur <code>(club_id, local_tournament_id)</code> propage les nouveaux <code>emailHash</code>) puis demander aux joueurs concernés de se reconnecter (ou ajouter une commande oneshot backend qui scan).</li>
+  <li><strong>Tournois sans joueurs locaux poussés</strong> : si le club publie sans inclure ses joueurs locaux, aucun match possible. La case "Afficher la liste des joueurs" doit être cochée OU le publish doit transmettre la liste de toute façon.</li>
+  <li><strong>Player WPF sans email</strong> : skip (pas d'<code>emailHash</code> calculé, donc pas de match possible).</li>
+  <li><strong>Hash brute force</strong> : un attaquant qui a accès à la DB cloud peut potentiellement brute-forcer les hash d'emails communs (<code>jean@gmail.com</code>, etc.). Risque accepté pour l'instant — pour défense en profondeur, on pourrait saler avec un secret club-spécifique.</li>
+</ul>
+
 </section>
 
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">

@@ -121,14 +121,15 @@ Voir [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) pour le détail colonne par colo
 
 ## État des chantiers (mai 2026)
 
-**Shippé** : 0.A foundation, 0.B RBAC + ops, 0.C members, 0.D tournois publiés (+ γ.1 barème, γ.3 formule custom), 0.E joueurs (magic link + Google OAuth + Calendar + RGPD), 0.F adhésions + members_only, 0.G saisons.
+**Shippé** : 0.A foundation, 0.B RBAC + ops, 0.C members, 0.D tournois publiés (+ γ.1 barème, γ.3 formule custom), 0.E joueurs (magic link + Google OAuth + Calendar + RGPD), 0.F adhésions + members_only, 0.G saisons, 0.H auto-link compte joueur ↔ clubs via emailHash.
 
 **Pending** :
 - Stripe Checkout (besoin compte + clés API)
 - F2 PokClock Live (WebSocket realtime, scoping à faire)
 - F4 Multi-Canaux Auto (Discord/Telegram/Insta/FB, clés API requises)
 - Setup VPS env vars : `PLAYER_COOKIE_DOMAIN=.pokclock.com`, `GOOGLE_OAUTH_CLIENT_ID/SECRET`
-- Push WPF depuis Windows (12 commits accumulés au 2026-05-27)
+- Push WPF depuis Windows (14 commits accumulés au 2026-05-28)
+- Rebuild + republish des tournois existants pour propager `emailHash` aux snapshots `local_players` (sinon les anciens joueurs locaux ne seront pas matchés)
 
 ## Pour creuser davantage
 

@@ -3,9 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Phase 0.B — Bilan ops dashboard — pokclock-api</title>
-<meta name="description" content="Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G livrées en mai 2026.">
+<title>Phases 0.B → 0.H — Bilan — pokclock-api</title>
+<meta name="description" content="Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G / 0.H livrées en mai 2026.">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+<script defer src="mermaid-zoom.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
@@ -14,26 +16,29 @@
 <div class="layout">
 
 <aside>
-  <a href="index.html" class="brand">pokclock-api
+  <a href="docs.html" class="brand">pokclock-api
     <small>Documentation</small>
   </a>
 
   <nav>
     <ol>
+      <li><a href="docs.html">Accueil</a></li>
       <li><a href="index.html">Référence technique principale</a></li>
-      <li><a href="architecture.html">Architecture &amp; diagrammes</a></li>
+      <li><a href="architecture.html">Architecture & diagrammes</a></li>
       <li><a href="use-cases.html">Cas d'usage par acteur</a></li>
       <li><a href="database-schema.html">DB Schema</a></li>
       <li><a href="players-data-storage.html">Joueurs & RGPD</a></li>
-      <li class="active"><a href="phase-0b-bilan.html">Phase 0.B</a></li>
+      <li class="active"><a href="phase-0b-bilan.html">Phases 0.B → 0.H</a></li>
     </ol>
   </nav>
 
   <div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.8rem;color:var(--fg-muted);">
-    <p>Sources MD :</p>
+    <p>Sources MD (pour IA) :</p>
     <ul style="list-style:none;padding:0;margin:0;">
+      <li><a href="../doc-ia/INDEX.md">INDEX.md</a></li>
       <li><a href="../doc-ia/DATABASE_SCHEMA.md">DATABASE_SCHEMA.md</a></li>
       <li><a href="../doc-ia/PLAYERS_DATA_STORAGE.md">PLAYERS_DATA_STORAGE.md</a></li>
+      <li><a href="../doc-ia/PHASE-0B-OPS-ROADMAP.md">PHASE-0B-OPS-ROADMAP.md</a></li>
     </ul>
     <p style="margin-top:0.5rem;"><a href="https://github.com/cedricleblond35/pokclock-api">Repo GitHub</a></p>
   </div>
@@ -42,8 +47,8 @@
 <main id="top">
 
 <div class="banner">
-  <h1>Phase 0.B — Bilan ops dashboard</h1>
-  <p>Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G livrées en mai 2026.</p>
+  <h1>Phases 0.B → 0.H — Bilan</h1>
+  <p>Roadmap et bilans cumulés des phases 0.B / 0.C / 0.D / 0.E / 0.F / 0.G / 0.H livrées en mai 2026.</p>
 </div>
 
 <h1>Phase 0.B → ops.pokclock.com — Dashboard admin unifié</h1>
@@ -686,16 +691,108 @@ tout intégré : observabilité tech + gestion des clubs + licenses + audit.</p>
 <td>Confirmation inline (premier clic explique les conséquences)</td>
 </tr>
 </tbody></table>
-<h3>Tables Postgres au 2026-05-27 (post 0.E + 0.F + 0.E.5)</h3>
+<h3>Tables Postgres au 2026-05-28 (post 0.E + 0.F + 0.E.5 + 0.G + 0.H)</h3>
 <p><code>structures</code>, <code>structures_audit</code>, <code>clubs</code>, <code>licenses</code>, <code>members</code>,
-<code>published_tournaments</code>, <code>tournament_registrations</code>, <code>point_schemes</code>,
-<code>players</code>, <code>player_magic_links</code>, <code>tournament_results</code>,
-<strong><code>player_club_memberships</code></strong>, <strong><code>player_google_tokens</code></strong>.</p>
-<p>Détails complets : voir <a href="database-schema.html">database-schema.html</a>.</p>
+<code>published_tournaments</code> (avec colonnes <code>audience</code>, <code>season_id</code>, <code>local_players</code> enrichi <code>emailHash</code>),
+<code>tournament_registrations</code>, <code>point_schemes</code>, <code>players</code>,
+<code>player_magic_links</code>, <code>tournament_results</code>,
+<strong><code>player_club_memberships</code></strong>, <strong><code>player_google_tokens</code></strong>,
+<strong><code>seasons</code></strong> (Phase 0.G).</p>
+<p>Détails complets : voir <a href="database-schema.html"><code>DATABASE_SCHEMA.md</code></a>.</p>
+<hr>
+<h2>Update 2026-05-28 — Phase 0.G (saisons) + Phase 0.H (auto-link)</h2>
+<h3>Phase 0.G Saisons / championnats</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Migration 025 <code>seasons</code> + 026 <code>published_tournaments.season_id</code> nullable</td>
+<td>x</td>
+<td>CHECK <code>ends_at &gt; starts_at</code>, UNIQUE <code>(club_id, slug)</code></td>
+</tr>
+<tr>
+<td>Backend CRUD <code>/api/club/seasons</code> + publish accepte <code>seasonId</code></td>
+<td>x</td>
+<td>Verify season belongs to club au publish</td>
+</tr>
+<tr>
+<td>Public <code>/public/clubs/:slug/seasons</code> + <code>:season_slug</code> leaderboard scopé</td>
+<td>x</td>
+<td>Filtre archives, agrégation <code>GROUP BY lower(first_name, last_name)</code> filtrée par <code>season_id</code></td>
+</tr>
+<tr>
+<td>Frontend <code>/clubs/[slug]/saisons</code> + <code>/saisons/[season_slug]</code></td>
+<td>x</td>
+<td>Status badges actif / à venir / clôturé</td>
+</tr>
+<tr>
+<td>WPF onglet <code>Mon club &gt; SAISONS</code> avec CRUD + dropdown saison dans PublishSettingsDialog</td>
+<td>x</td>
+<td>SeasonDialog code-behind avec date pickers + status combo</td>
+</tr>
+</tbody></table>
+<h3>Phase 0.H Auto-link compte joueur ↔ clubs via emailHash</h3>
+<p>Hooks aux nouveaux comptes joueurs (magic link verify + Google OAuth callback). Le backend cherche l&#39;email du nouveau player dans tous les <code>published_tournaments.local_players[].emailHash</code> et crée des <code>player_club_memberships</code> status <code>pending</code> pour les clubs matchés. L&#39;admin valide ensuite d&#39;un clic depuis WPF.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>internal/api/players_autolink.go</code> : helper <code>autoLinkPlayerToClubs(playerID, email)</code></td>
+<td>x</td>
+<td>Calcule sha256(lower(trim(email))) hex, query JSONB containment</td>
+</tr>
+<tr>
+<td>Hook fire-and-forget dans <code>verifyMagicLink</code></td>
+<td>x</td>
+<td><code>go autoLinkPlayerToClubs(context.Background(), ...)</code></td>
+</tr>
+<tr>
+<td>Hook fire-and-forget dans <code>upsertPlayerFromGoogle</code></td>
+<td>x</td>
+<td>Idem pour le flow Google OAuth</td>
+</tr>
+<tr>
+<td>WPF : <code>LocalPlayerRecord</code> gagne <code>EmailHash</code> nullable</td>
+<td>x</td>
+<td>sha256 calculé dans <code>BuildLocalPlayersListAsync</code></td>
+</tr>
+<tr>
+<td>WPF : <code>HashEmailOrNull</code> miroir strict de l&#39;algo Go</td>
+<td>x</td>
+<td>UTF-8 bytes → SHA-256 → hex lowercase</td>
+</tr>
+<tr>
+<td>Frontend dashboard joueur : banner explicatif sur les demandes auto</td>
+<td>x</td>
+<td>Section &quot;Mes clubs&quot; affiche un message sky quand status=pending</td>
+</tr>
+</tbody></table>
+<p><strong>Privacy / RGPD</strong> :</p>
+<ul>
+<li>L&#39;email lui-même ne traverse jamais le réseau cloud côté WPF → API</li>
+<li>Seul le hash SHA-256 one-way est inclus dans le JSONB <code>local_players</code> déjà poussé au publish</li>
+<li>Aucune nouvelle PII transmise au backend par rapport à l&#39;avant-0.H</li>
+</ul>
+<p><strong>Limitation connue</strong> :</p>
+<ul>
+<li>Les comptes joueurs créés AVANT le déploiement de 0.H ne sont pas rétro-linkés (les anciens snapshots ne contiennent pas <code>emailHash</code>)</li>
+<li>Pour réparer : rebuild + republish les tournois existants depuis WPF version 0.H, OU ajouter une commande oneshot backend qui scanne et match (à coder si besoin)</li>
+<li>Le match ne fonctionne que si le club a publié au moins UN tournoi avec ce joueur dans <code>local_players</code> (donc avec <code>show_players=true</code> au moment du publish, ou avec <code>localPlayers</code> poussé de toute façon)</li>
+</ul>
 
 
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
-  <p>pokclock-api · Documentation auto-générée depuis les .md du repo.</p>
+  <p>pokclock-api · Documentation auto-générée depuis les .md de doc-ia/.</p>
 </footer>
 
 </main>

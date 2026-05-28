@@ -4,8 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Schéma base de données — pokclock-api</title>
-<meta name="description" content="Inventaire complet des 13 tables Postgres, leurs colonnes, relations, et qui les consomme par endpoint.">
+<meta name="description" content="Inventaire complet des tables Postgres, leurs colonnes, relations, et qui les consomme par endpoint.">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+<script defer src="mermaid-zoom.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
@@ -14,26 +16,29 @@
 <div class="layout">
 
 <aside>
-  <a href="index.html" class="brand">pokclock-api
+  <a href="docs.html" class="brand">pokclock-api
     <small>Documentation</small>
   </a>
 
   <nav>
     <ol>
+      <li><a href="docs.html">Accueil</a></li>
       <li><a href="index.html">Référence technique principale</a></li>
-      <li><a href="architecture.html">Architecture &amp; diagrammes</a></li>
+      <li><a href="architecture.html">Architecture & diagrammes</a></li>
       <li><a href="use-cases.html">Cas d'usage par acteur</a></li>
       <li class="active"><a href="database-schema.html">DB Schema</a></li>
       <li><a href="players-data-storage.html">Joueurs & RGPD</a></li>
-      <li><a href="phase-0b-bilan.html">Phase 0.B</a></li>
+      <li><a href="phase-0b-bilan.html">Phases 0.B → 0.H</a></li>
     </ol>
   </nav>
 
   <div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.8rem;color:var(--fg-muted);">
-    <p>Sources MD :</p>
+    <p>Sources MD (pour IA) :</p>
     <ul style="list-style:none;padding:0;margin:0;">
+      <li><a href="../doc-ia/INDEX.md">INDEX.md</a></li>
       <li><a href="../doc-ia/DATABASE_SCHEMA.md">DATABASE_SCHEMA.md</a></li>
       <li><a href="../doc-ia/PLAYERS_DATA_STORAGE.md">PLAYERS_DATA_STORAGE.md</a></li>
+      <li><a href="../doc-ia/PHASE-0B-OPS-ROADMAP.md">PHASE-0B-OPS-ROADMAP.md</a></li>
     </ul>
     <p style="margin-top:0.5rem;"><a href="https://github.com/cedricleblond35/pokclock-api">Repo GitHub</a></p>
   </div>
@@ -43,7 +48,7 @@
 
 <div class="banner">
   <h1>Schéma base de données</h1>
-  <p>Inventaire complet des 13 tables Postgres, leurs colonnes, relations, et qui les consomme par endpoint.</p>
+  <p>Inventaire complet des tables Postgres, leurs colonnes, relations, et qui les consomme par endpoint.</p>
 </div>
 
 <h1>Schéma base de données PokClock</h1>
@@ -831,7 +836,7 @@
 <tr>
 <td><code>local_players</code></td>
 <td>jsonb NOT NULL DEFAULT <code>[]</code></td>
-<td>Snapshot des joueurs locaux poussés par WPF. Ajouté en 012</td>
+<td>Snapshot des joueurs locaux poussés par WPF. Ajouté en 012. Schéma : <code>[{firstName, lastName, nickname?, emailHash?}]</code>. <code>emailHash</code> (Phase 0.H) = sha256(lower(trim(email))) hex, sert au backend pour auto-link les comptes joueurs cloud créés ensuite. L&#39;email lui-même n&#39;est jamais transmis (RGPD)</td>
 </tr>
 <tr>
 <td><code>prize_structure</code></td>
@@ -1550,8 +1555,14 @@
 <td>x</td>
 <td></td>
 </tr>
+<tr>
+<td>Backend auto (Phase 0.H)</td>
+<td>Hook après <code>verifyMagicLink</code> ou Google callback : <code>autoLinkPlayerToClubs</code> cherche <code>emailHash</code> dans <code>local_players</code> et INSERT pending pour chaque club matché</td>
+<td>x</td>
+<td>x</td>
+</tr>
 </tbody></table>
-<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_memberships.go"><code>internal/api/players_memberships.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_memberships.go"><code>internal/api/club_memberships.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_registrations.go"><code>internal/api/players_registrations.go</code></a>.</p>
+<p>Handler : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_memberships.go"><code>internal/api/players_memberships.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/club_memberships.go"><code>internal/api/club_memberships.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_registrations.go"><code>internal/api/players_registrations.go</code></a>, <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/players_autolink.go"><code>internal/api/players_autolink.go</code></a>.</p>
 <hr>
 <h2>player_google_tokens</h2>
 <blockquote>
@@ -1713,7 +1724,7 @@ WHERE player_id IS NOT NULL AND status IN (&#39;pending&#39;, &#39;confirmed&#39
 
 
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
-  <p>pokclock-api · Documentation auto-générée depuis les .md du repo.</p>
+  <p>pokclock-api · Documentation auto-générée depuis les .md de doc-ia/.</p>
 </footer>
 
 </main>
