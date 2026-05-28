@@ -208,6 +208,75 @@ pre:hover .copy-btn { opacity: 1; }
   min-width: 600px;
   height: auto !important;
 }
+.mermaid:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+/* Modale zoom diagramme */
+#mermaid-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  z-index: 9999;
+  display: none;
+  flex-direction: column;
+}
+#mermaid-zoom-overlay.mz-open { display: flex; }
+
+#mermaid-zoom-overlay .mz-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+#mermaid-zoom-overlay .mz-btn {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.8rem;
+  font-size: 1rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  min-width: 2.5rem;
+}
+#mermaid-zoom-overlay .mz-btn:hover {
+  background: var(--bg-elev);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#mermaid-zoom-overlay .mz-close { color: var(--danger); }
+
+#mermaid-zoom-overlay .mz-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+#mermaid-zoom-overlay .mz-stage svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#mermaid-zoom-overlay .mz-hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  background: var(--bg-elev);
+  padding: 0.4rem 0.9rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
 
 /* Tables */
 table {
