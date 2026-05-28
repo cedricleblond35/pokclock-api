@@ -136,7 +136,7 @@ func (h *playersDashboardHandler) getDashboard(c echo.Context) error {
 	widgets := make([]clubWidget, 0, len(clubsList))
 	for _, cr := range clubsList {
 		w := clubWidget{
-			Club: clubWidgetClub{ID: cr.ID, Slug: cr.Slug, Name: cr.Name},
+			Club: clubWidgetClub(cr),
 		}
 		w.MyRank = h.computeRank(ctx, cr.ID, claims.PlayerID, firstName, lastName, nil)
 		w.ActiveSeason = h.fetchActiveSeason(ctx, cr.ID, claims.PlayerID, firstName, lastName)
