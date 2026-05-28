@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Référence API — PokClock</title>
+<meta name="description" content="Référence complète des routes HTTP de pokclock-api : méthode, path, auth requise, paramètres, body JSON, codes d'erreur, rôle métier pour chaque endpoint.">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  .route-block {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    background: var(--bg-elev);
+  }
+  .route-method {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: bold;
+    margin-right: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .m-GET    { background: rgba(63, 185, 80, 0.15);  color: #3fb950; border: 1px solid rgba(63, 185, 80, 0.4); }
+  .m-POST   { background: rgba(88, 166, 255, 0.15); color: #58a6ff; border: 1px solid rgba(88, 166, 255, 0.4); }
+  .m-PATCH  { background: rgba(210, 153, 34, 0.15); color: #d29922; border: 1px solid rgba(210, 153, 34, 0.4); }
+  .m-PUT    { background: rgba(210, 153, 34, 0.15); color: #d29922; border: 1px solid rgba(210, 153, 34, 0.4); }
+  .m-DELETE { background: rgba(248, 81, 73, 0.15);  color: #f85149; border: 1px solid rgba(248, 81, 73, 0.4); }
+  .route-path {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .route-block h3 {
+    margin: 0 0 0.6rem;
+    border: none;
+    padding: 0;
+  }
+  .route-block dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.4rem 1rem;
+    margin: 0.6rem 0;
+    font-size: 0.92rem;
+  }
+  .route-block dt {
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    padding-top: 0.15rem;
+  }
+  .route-block dd {
+    margin: 0;
+    color: var(--fg);
+  }
+  .route-block dd code { background: var(--bg-code); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.85rem; }
+  .auth-pill {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    background: var(--bg-code);
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+  }
+  .auth-anon { color: var(--success); border-color: rgba(63, 185, 80, 0.4); }
+  .auth-player { color: var(--accent); border-color: rgba(88, 166, 255, 0.4); }
+  .auth-staff { color: var(--warning); border-color: rgba(210, 153, 34, 0.4); }
+  .auth-superadmin { color: var(--danger); border-color: rgba(248, 81, 73, 0.4); }
+  .group-intro {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 0.75rem 1rem;
+    margin: 1rem 0 1.5rem;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 0.92rem;
+  }
+  pre code.hljs {
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<aside>
+  <a href="docs.html" class="brand">pokclock-api
+    <small>Documentation</small>
+  </a>
+
+  <nav>
+    <ol>
+      <li><a href="docs.html">Accueil</a></li>
+      <li><a href="index.html">Référence technique principale</a></li>
+      <li><a href="architecture.html">Architecture &amp; diagrammes</a></li>
+      <li><a href="use-cases.html">Cas d'usage par acteur</a></li>
+      <li class="active"><a href="api-routes.html">Référence API HTTP</a></li>
+      <li><a href="database-schema.html">Schéma base de données</a></li>
+      <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.I</a></li>
+    </ol>
+  </nav>
+
+  <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);">
+    <p style="font-size:0.75rem;color:var(--fg-muted);text-transform:uppercase;letter-spacing:0.05em;margin:0 0 0.5rem;">Groupes de routes</p>
+    <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;line-height:1.7;">
+      <li><a href="#systeme">1. Système</a></li>
+      <li><a href="#auth-desktop">2. Auth desktop</a></li>
+      <li><a href="#structures">3. Structures blinds</a></li>
+      <li><a href="#club-admin">4. Espace club admin</a></li>
+      <li><a href="#public">5. Public anonyme</a></li>
+      <li><a href="#players-auth">6. Auth joueur</a></li>
+      <li><a href="#players-me">7. Espace joueur</a></li>
+      <li><a href="#admin">8. Superadmin</a></li>
+    </ul>
+  </div>
+</aside>
+
+<main id="top">
+
+<div class="banner">
+  <h1>Référence API HTTP</h1>
+  <p>Liste exhaustive des endpoints exposés par <code>pokclock-api</code> (Go/Echo). Pour chaque route : méthode, chemin, authentification requise, paramètres, body JSON, codes de réponse et rôle métier. Voir aussi <a href="../doc-ia/API_ROUTES.md">la version MD pour AI</a>.</p>
+  <div class="meta">
+    <span><strong>Dernière maj</strong> 2026-05-28</span>
+    <span><strong>Phases couvertes</strong> 0.A → 0.I</span>
+    <span><strong>Source</strong> <code>internal/api/router.go</code></span>
+  </div>
+</div>
+
+<section>
+<h2>Conventions</h2>
+<ul>
+  <li><strong>Format</strong> : toutes les requêtes/réponses en JSON, <code>Content-Type: application/json</code>. Erreurs au format <code>{"error": "code_machine_readable", "detail"?: "message humain"}</code>.</li>
+  <li><strong>Timestamps</strong> : RFC3339 UTC (<code>2026-05-28T13:42:00Z</code>).</li>
+  <li><strong>UUIDs</strong> : format canonique <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>.</li>
+  <li><strong>Auth</strong> :
+    <ul>
+      <li><span class="auth-pill auth-anon">anonyme</span> aucun token requis</li>
+      <li><span class="auth-pill auth-player">JWT player</span> cookie <code>pokclock_player</code> (HttpOnly, Domain=<code>.pokclock.com</code>)</li>
+      <li><span class="auth-pill auth-staff">JWT staff</span> header <code>Authorization: Bearer &lt;jwt&gt;</code>, license desktop, club-scoped</li>
+      <li><span class="auth-pill auth-superadmin">JWT superadmin</span> rôle <code>superadmin</code> requis, cross-clubs</li>
+    </ul>
+  </li>
+  <li><strong>Rate-limit</strong> : <code>/api/auth/*</code> et <code>/api/players/auth/*</code> limités à 10 req/min par IP (memory store Echo).</li>
+</ul>
+</section>
+
+<!-- ============================================================
+     1. SYSTÈME
+============================================================ -->
+<section id="systeme">
+<h2>1. Système</h2>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/health</span></h3>
+  <dl>
+    <dt>Auth</dt><dd><span class="auth-pill auth-anon">anonyme</span></dd>
+    <dt>Réponse</dt><dd><code>200 { "status": "ok", "build": "SHA" }</code></dd>
+    <dt>Purpose</dt><dd>Health check. Retourne le build SHA du serveur.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/.well-known/jwks.json</span></h3>
+  <dl>
+    <dt>Auth</dt><dd><span class="auth-pill auth-anon">anonyme</span></dd>
+    <dt>Réponse</dt><dd><code>200 { "keys": [...] }</code> (JWKS RS256)</dd>
+    <dt>Purpose</dt><dd>Expose la clé publique pour qu'un consommateur tiers vérifie les JWT émis par l'API.</dd>
+  </dl>
+</div>
+
+</section>
+
+<!-- ============================================================
+     2. AUTH DESKTOP
+============================================================ -->
+<section id="auth-desktop">
+<h2>2. <code>/api/auth/*</code> — Authentification desktop (license → JWT staff)</h2>
+<div class="group-intro">
+  Échange license + hardwareId contre un JWT RS256 24h. Utilisé par l'app WPF au démarrage. <strong>Rate-limit : 10 req/min/IP.</strong>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/auth/issue</span></h3>
+  <dl>
+    <dt>Auth</dt><dd><span class="auth-pill auth-anon">anonyme</span> (vérif côté Worker Cloudflare)</dd>
+    <dt>Body</dt><dd><code>{ "licenseKey": string, "hardwareId": string, "workerToken": string }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { "token": "JWT", "tier": "Solo|Club|Pro", "expiresAt": RFC3339 }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 invalid_body</code>, <code>400 missing_fields</code>, <code>401 license_invalid</code>, <code>502 license_verification_unavailable</code></dd>
+    <dt>Purpose</dt><dd>Vérifie la licence côté Worker Cloudflare D1, émet un JWT RS256 pour appeler les routes club-scoped (<code>/api/structures/*</code>, <code>/api/club/*</code>).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/auth/refresh</span></h3>
+  <dl>
+    <dt>Auth</dt><dd><span class="auth-pill auth-anon">anonyme</span></dd>
+    <dt>Réponse</dt><dd><code>501 { "error": "refresh_not_yet_implemented", "phase": "0.B" }</code></dd>
+    <dt>Purpose</dt><dd>Stub pour Phase 0.B. La rotation de tokens n'est pas implémentée — re-call <code>/api/auth/issue</code>.</dd>
+  </dl>
+</div>
+
+</section>
+
+<!-- ============================================================
+     3. STRUCTURES
+============================================================ -->
+<section id="structures">
+<h2>3. <code>/api/structures/*</code> — Structures de blinds (club-scoped)</h2>
+<div class="group-intro">
+  Auth <span class="auth-pill auth-staff">JWT staff</span>. Filtrage automatique sur <code>claims.ClubID</code> — impossible de voir les structures d'un autre club.
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/structures</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=50&amp;offset=0</code> (max 200)</dd>
+    <dt>Réponse</dt><dd><code>200 { structures, limit, offset }</code></dd>
+    <dt>Purpose</dt><dd>Liste les structures de blinds du club du caller.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/structures</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "slug": string, "name": string, "kind": "club|casino|home|streamer|other", "settings": object }</code></dd>
+    <dt>Réponse</dt><dd><code>201 { structure }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 missing_fields|invalid_kind</code>, <code>409 slug_taken</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/structures/:slug</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { structure }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 not_found</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-PATCH">PATCH</span><span class="route-path">/api/structures/:slug</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "name"?, "kind"?, "settings"? }</code> tous optionnels</dd>
+    <dt>Réponse</dt><dd><code>200 { structure }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 invalid_kind</code>, <code>404 not_found</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/structures/:slug</span></h3>
+  <dl>
+    <dt>Auth</dt><dd><span class="auth-pill auth-staff">admin/superadmin</span> requis (middleware supplémentaire)</dd>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+    <dt>Purpose</dt><dd>Hard delete + entrée dans <code>structures_audit</code>.</dd>
+  </dl>
+</div>
+
+</section>
+
+<!-- ============================================================
+     4. CLUB ADMIN
+============================================================ -->
+<section id="club-admin">
+<h2>4. <code>/api/club/*</code> — Espace club admin</h2>
+<div class="group-intro">
+  Auth <span class="auth-pill auth-staff">JWT staff</span> + <code>requireAnyRole(admin, superadmin)</code>. Toujours scopé au club du caller. Le superadmin global peut atteindre les routes d'<strong>autres</strong> clubs uniquement via <code>/api/admin/*</code>.
+</div>
+
+<h3 style="margin-top:1.5rem;">Infos &amp; flags</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/info</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { id, name, slug, plan, email, status, onlineRegistrationsEnabled, createdAt, updatedAt }</code></dd>
+    <dt>Erreurs</dt><dd><code>410 club_gone</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-PATCH">PATCH</span><span class="route-path">/api/club/online-registrations</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "enabled": bool }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { enabled }</code></dd>
+    <dt>Purpose</dt><dd>Toggle l'opt-in inscriptions en ligne. Si <code>false</code>, le site public retourne <code>404 club_not_found</code>.</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Licenses du club</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/licenses</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=50&amp;offset=0&amp;status=&amp;role=member|admin|superadmin</code></dd>
+    <dt>Réponse</dt><dd><code>200 { licenses, limit, offset }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/licenses</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "role": "member|admin", "expiresAt"?: RFC3339, "memberId"?: uuid }</code></dd>
+    <dt>Réponse</dt><dd><code>201 { license, licenseKey, workerToken, syncStatus }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 member_not_found</code>, <code>403 cannot_create_superadmin</code>, <code>409 license_key_collision</code></dd>
+    <dt>Purpose</dt><dd>Génère licenseKey + workerToken, syncronise vers D1 Worker. La création de role=superadmin est réservée à <code>/api/admin/licenses</code>.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/licenses/:id/revoke</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { license, syncStatus }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 not_found</code></dd>
+    <dt>Purpose</dt><dd>Révoque + propage vers D1 Worker. Côté WPF, le prochain <code>POST /api/auth/issue</code> renverra <code>401 license_invalid</code>.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/licenses/:id/assign-member</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "memberId"?: uuid }</code> (null pour désassigner)</dd>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+    <dt>Erreurs</dt><dd><code>404 license_not_found|member_not_found</code></dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Membres du club</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/members</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=100&amp;offset=0</code></dd>
+    <dt>Réponse</dt><dd><code>200 { members, limit, offset }</code></dd>
+    <dt>Purpose</dt><dd>Membres = personnes morales du club (dealers, employés), distincts des <code>players</code> (joueurs cloud).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/members</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "firstName": string, "lastName": string, "email"?: string, "notes"?: string }</code></dd>
+    <dt>Réponse</dt><dd><code>201 { member }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 missing_fields</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-PATCH">PATCH</span><span class="route-path">/api/club/members/:id</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "firstName"?, "lastName"?, "email"?, "notes"?, "status"?: "active|inactive" }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { member }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/club/members/:id</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+    <dt>Purpose</dt><dd>Hard delete. Les licenses liées passent <code>member_id=NULL</code> mais ne sont pas révoquées.</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Audit du club</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/audit</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=100&amp;offset=0&amp;actor=&amp;action=created|updated|deleted&amp;structureId=&amp;from=&amp;to=</code></dd>
+    <dt>Réponse</dt><dd><code>200 { entries, limit, offset }</code></dd>
+    <dt>Purpose</dt><dd>Historique des modifs structures du club. Pas cross-club (filtré sur <code>claims.ClubID</code>).</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Adhésions joueurs (Phase 0.F)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/memberships</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=100&amp;offset=0&amp;status=pending|active|rejected|revoked</code></dd>
+    <dt>Réponse</dt><dd><code>200 { memberships, limit, offset }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/memberships/:id/approve</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "active" }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 not_found</code>, <code>409 invalid_transition</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/memberships/:id/reject</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "reason"?: string }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { status: "rejected" }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/memberships/:id/revoke</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "reason"?: string }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { status: "revoked" }</code></dd>
+    <dt>Purpose</dt><dd>Exclusion d'un membre actif (active → revoked).</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Barème de points (Phase 0.D-γ.1)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/point-scheme</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { clubId, name, type, params, updatedAt }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 not_configured</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-PUT">PUT</span><span class="route-path">/api/club/point-scheme</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "name": string, "type": "linear|fixed|proportional|custom", "params": object }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { scheme }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 invalid_type|invalid_params</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/club/point-scheme</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Saisons (Phase 0.G)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/seasons</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { seasons }</code> (avec <code>tournamentsCount</code>)</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/seasons</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "slug": string, "name": string, "description"?: string, "startsAt": RFC3339, "endsAt": RFC3339 }</code></dd>
+    <dt>Réponse</dt><dd><code>201 { season }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 invalid_starts_at|ends_before_starts</code>, <code>409 slug_already_used</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-PATCH">PATCH</span><span class="route-path">/api/club/seasons/:id</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "name"?, "description"?, "startsAt"?, "endsAt"?, "status"?: "upcoming|active|finished|archived" }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { season }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/club/seasons/:id</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+    <dt>Purpose</dt><dd>Suppression. Les <code>published_tournaments</code> associés conservent leur ligne mais <code>season_id=NULL</code>.</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Tournois publiés (Phase 0.D-α)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/tournaments</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=100&amp;offset=0&amp;status=</code></dd>
+    <dt>Réponse</dt><dd><code>200 { tournaments, limit, offset }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/tournaments</span></h3>
+  <dl>
+    <dt>Body</dt><dd>Payload UPSERT, ~20 champs (cf. structure <code>publishRequest</code>). Inclut <code>localTournamentId</code>, <code>showPlayers</code>, <code>playersDisplayMode</code>, <code>localPlayers</code> (avec <code>emailHash</code> Phase 0.H), <code>prizeStructure</code>, <code>audience</code> (<code>public|members_only</code>), <code>seasonId</code>.</dd>
+    <dt>Réponse</dt><dd><code>201 { tournament }</code> (insert) ou <code>200 { tournament }</code> (update via UPSERT)</dd>
+    <dt>Erreurs</dt><dd><code>400 invalid_display_mode|season_not_in_club</code>, <code>403 online_registrations_disabled</code></dd>
+    <dt>Purpose</dt><dd>UPSERT par <code>(club_id, local_tournament_id)</code>. Endpoint principal appelé par WPF Publish.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/tournaments/:id/close</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+    <dt>Erreurs</dt><dd><code>404 not_found_or_not_open</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/tournaments/:id/cancel</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Résultats finaux (Phase 0.E.4)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/tournaments/:id/results</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "results": [{ "position": int, "firstName": string, "lastName": string, "playerId"?: uuid, "points"?: int, "prizeAmount"?: string }], "applyPointScheme": bool, "closeTournament": bool }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { "status": "published", "count": int, "applied": bool }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 empty_results|invalid_position|custom_scheme_requires_explicit_points</code>, <code>404 tournament_not_found</code></dd>
+    <dt>Purpose</dt><dd>DELETE + INSERT par position. Si <code>applyPointScheme=true</code>, calcule les points via le barème du club (linear/fixed/proportional). Le custom oblige à fournir <code>points</code> explicite.</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Modération inscriptions en ligne</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/club/tournaments/:tid/registrations</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=200&amp;offset=0&amp;status=</code></dd>
+    <dt>Réponse</dt><dd><code>200 { registrations, limit, offset }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/registrations/:id/confirm</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status }</code></dd>
+    <dt>Purpose</dt><dd>pending → confirmed. Envoie email de confirmation. Crée l'événement Google Calendar côté joueur si connecté.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/club/registrations/:id/reject</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "reason"?: string }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { status }</code></dd>
+  </dl>
+</div>
+
+</section>
+
+<!-- ============================================================
+     5. PUBLIC
+============================================================ -->
+<section id="public">
+<h2>5. <code>/public/*</code> — Endpoints anonymes</h2>
+<div class="group-intro">
+  Auth <span class="auth-pill auth-anon">anonyme</span>. Filtre <code>clubs.online_registrations_enabled = true</code> sur toutes les routes club-scoped — un club opt-out renvoie 404 indistinctement.
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/public/clubs/:slug/tournaments</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { tournaments: [...], club: {id, name, slug} }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 club_not_found</code></dd>
+    <dt>Purpose</dt><dd>Liste les tournois <code>open|closed</code> du club.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/public/clubs/:slug/tournaments/:id</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { ...tournament, players: [], prizeStructure?, pointScheme? }</code></dd>
+    <dt>Purpose</dt><dd>Détail tournoi. La liste <code>players</code> est filtrée selon <code>show_players</code> + <code>players_display_mode</code> (hidden/full_name/first_initial_last/pseudo).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/public/clubs/:slug/tournaments/:id/register</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "firstName": string, "lastName": string, "email": string, "phone"?: string }</code></dd>
+    <dt>Réponse</dt><dd><code>201 { id, status: "pending", cancelToken, registeredAt, tournamentId, message }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 missing_fields|invalid_email</code>, <code>404 club_not_found|tournament_not_found</code>, <code>409 registrations_closed|tournament_started|tournament_full|already_registered</code>, <code>403 members_only</code></dd>
+    <dt>Purpose</dt><dd>Inscription anonyme. Email Resend de confirmation avec <code>cancelToken</code> (URL-safe 32 bytes).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/public/registrations/:token/cancel</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "cancelled" }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 not_found_or_already_cancelled</code> (indistinguable, anti-bruteforce)</dd>
+    <dt>Purpose</dt><dd>Magic link d'annulation embarqué dans l'email de confirmation.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/public/clubs/:slug/tournaments/:id/results</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { results: [{ position, firstName, lastName, points, prizeAmount? }] }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/public/clubs/:slug/leaderboard</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=50</code> (max 200)</dd>
+    <dt>Réponse</dt><dd><code>200 { club, entries: [{ rank, firstName, lastName, totalPoints, tournamentsPlayed, wins }] }</code></dd>
+    <dt>Purpose</dt><dd>Leaderboard global agrégé sur tous les tournois publiés du club. Groupe par <code>(lower(firstName), lower(lastName))</code>.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/public/clubs/:slug/seasons</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { club, seasons: [...] }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/public/clubs/:slug/seasons/:season_slug</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=100</code> (max 500)</dd>
+    <dt>Réponse</dt><dd><code>200 { season, entries: [...] }</code></dd>
+    <dt>Purpose</dt><dd>Leaderboard scopé à une saison (même agrégation que <code>/leaderboard</code>, filtre <code>season_id</code>).</dd>
+  </dl>
+</div>
+
+</section>
+
+<!-- ============================================================
+     6. PLAYERS AUTH
+============================================================ -->
+<section id="players-auth">
+<h2>6. <code>/api/players/auth/*</code> — Authentification joueur</h2>
+<div class="group-intro">
+  Magic link Resend + Google OAuth. <strong>Rate-limit : 10 req/min/IP.</strong> Token sortant : cookie <code>pokclock_player</code> (HttpOnly, Secure, SameSite=Lax, Domain=<code>.pokclock.com</code>, 30 jours).
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/players/auth/magic-link</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "email": string }</code></dd>
+    <dt>Réponse</dt><dd><code>202 { status: "sent" }</code> (TOUJOURS 202, anti-énumération)</dd>
+    <dt>Erreurs</dt><dd><code>400 missing_email|invalid_email</code></dd>
+    <dt>Purpose</dt><dd>Email Resend avec lien <code>&lt;API&gt;/api/players/auth/magic-link/verify?token=&lt;32 bytes base64url&gt;</code>. Token valide 15 min, single-use.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/auth/magic-link/verify</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?token=&lt;base64url&gt;</code></dd>
+    <dt>Réponse</dt><dd><code>302 Redirect</code> → <code>&lt;publicSiteURL&gt;/joueurs/dashboard</code> + <code>Set-Cookie pokclock_player</code></dd>
+    <dt>Erreurs</dt><dd>Redirect avec <code>?error=invalid_token|expired_token|used_token</code></dd>
+    <dt>Purpose</dt><dd>Consomme le token, upsert le <code>player</code>, déclenche l'auto-link Phase 0.H, émet JWT.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/players/auth/logout</span></h3>
+  <dl>
+    <dt>Auth</dt><dd><span class="auth-pill auth-player">JWT player</span></dd>
+    <dt>Réponse</dt><dd><code>200 { status: "logged_out" }</code> + clear cookie</dd>
+    <dt>Purpose</dt><dd>Logout côté client. Pas de blacklist serveur, JWT expire naturellement.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/auth/google/start</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?redirect_uri=&lt;URL&gt;</code></dd>
+    <dt>Réponse</dt><dd><code>302 Redirect</code> vers consent Google</dd>
+    <dt>Erreurs</dt><dd><code>503 google_oauth_disabled</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/auth/google/callback</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?code=&amp;state=</code></dd>
+    <dt>Réponse</dt><dd><code>302 Redirect</code> + <code>Set-Cookie pokclock_player</code></dd>
+    <dt>Purpose</dt><dd>Échange code → id_token, upsert player, déclenche auto-link 0.H, set cookie.</dd>
+  </dl>
+</div>
+
+</section>
+
+<!-- ============================================================
+     7. PLAYERS ME
+============================================================ -->
+<section id="players-me">
+<h2>7. <code>/api/players/me/*</code> — Espace joueur connecté</h2>
+<div class="group-intro">
+  Auth <span class="auth-pill auth-player">JWT player</span> via cookie <code>pokclock_player</code>. <code>playerAuthMiddleware</code> rejette 401 si absent/invalide.
+</div>
+
+<h3 style="margin-top:1.5rem;">Profil</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/me</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { id, email, firstName, lastName, emailVerified, status, createdAt, updatedAt }</code></dd>
+    <dt>Erreurs</dt><dd><code>401 not_authenticated</code>, <code>410 player_gone</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-PATCH">PATCH</span><span class="route-path">/api/players/me</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "firstName"?: string, "lastName"?: string }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { profile }</code></dd>
+    <dt>Purpose</dt><dd>Email non modifiable (clé d'identité, liée à l'auto-link 0.H).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/players/me</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "deleted" }</code> + clear cookie</dd>
+    <dt>Purpose</dt><dd>Droit à l'effacement RGPD. Anonymise <code>tournament_registrations</code> + <code>tournament_results</code>, supprime player + magic_links.</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Inscriptions</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/players/me/clubs/:slug/tournaments/:id/register</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "firstName"?: string, "lastName"?: string, "phone"?: string }</code> (défauts = profil)</dd>
+    <dt>Réponse</dt><dd><code>201 { id, status: "pending", registeredAt, ... }</code></dd>
+    <dt>Erreurs</dt><dd><code>409 registrations_closed|tournament_started|tournament_full|already_registered</code>, <code>403 members_only</code>, <code>410 player_gone</code></dd>
+    <dt>Purpose</dt><dd>Inscription compte. Renseigne <code>player_id</code> (vs flow anonyme).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/players/me/registrations/:id</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "cancelled" }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 not_found|not_owner</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/me/registrations</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { registrations: [{ id, tournamentId, tournamentName, startAt, buyInAmount, clubName, clubSlug, status, registeredAt }] }</code></dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Adhésions clubs (Phase 0.F)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/me/clubs</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { memberships: [{ id, clubId, clubName, clubSlug, status, requestedAt, moderatedAt? }] }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/players/me/clubs/:slug/join</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>201 { status: "pending" }</code> (nouvelle demande) ou <code>200 { status: "pending" }</code> (re-demande après rejected/revoked)</dd>
+    <dt>Erreurs</dt><dd><code>404 club_not_found</code>, <code>409 already_pending|already_member</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/players/me/clubs/:slug</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "left" }</code></dd>
+    <dt>Erreurs</dt><dd><code>404 club_not_found|not_a_member</code></dd>
+    <dt>Purpose</dt><dd>Hard delete. Pour exclure un membre depuis le côté club : <code>POST /api/club/memberships/:id/revoke</code>.</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Google Calendar (Phase 0.E.5)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/me/google-calendar</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { available: bool, connected: bool, connectedAt?: RFC3339 }</code></dd>
+    <dt>Purpose</dt><dd><code>available=false</code> si credentials OAuth non configurées côté serveur.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/me/google-calendar/start</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>302 Redirect</code> vers consent Google (scope <code>calendar.events</code>)</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/me/google-calendar/callback</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?code=&amp;state=</code></dd>
+    <dt>Réponse</dt><dd><code>302 Redirect</code> vers dashboard avec <code>?calendar_connected=1</code> ou <code>?calendar_error=&lt;code&gt;</code></dd>
+    <dt>Purpose</dt><dd>Sauvegarde refresh_token chiffré dans <code>player_google_tokens</code>.</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/players/me/google-calendar</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "disconnected" }</code></dd>
+    <dt>Purpose</dt><dd>Révoque le token Google + delete la ligne locale.</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Dashboard agrégé (Phase 0.I)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/players/me/dashboard</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { widgets: [ClubWidget...] }</code></dd>
+    <dt>Tri</dt><dd>Par dernière activité (max <code>start_at</code> des tournois du club, fallback <code>requested_at</code> de la membership).</dd>
+    <dt>Scope</dt><dd>Uniquement memberships <code>status='active'</code>.</dd>
+    <dt>Erreurs</dt><dd><code>401 not_authenticated</code>, <code>410 player_gone</code></dd>
+    <dt>Purpose</dt><dd>Agrégation pour le dashboard joueur. Un widget par club actif : rang global, saison active + rang scopé, 3 prochains tournois + statut d'inscription.</dd>
+  </dl>
+
+  <p style="margin-top:0.8rem;font-size:0.85rem;color:var(--fg-muted);"><strong>Structure d'un ClubWidget :</strong></p>
+  <pre><code class="language-json">{
+  "club": { "id": uuid, "slug": string, "name": string },
+  "myRank": {
+    "position": int,
+    "totalEntries": int,
+    "totalPoints": int,
+    "tournamentsPlayed": int
+  } | null,
+  "activeSeason": {
+    "id": uuid, "slug": string, "name": string,
+    "startsAt": RFC3339, "endsAt": RFC3339,
+    "myRank": { ... } | null
+  } | null,
+  "upcomingTournaments": [{
+    "id": uuid, "name": string, "startAt": RFC3339,
+    "audience": "public|members_only",
+    "spotsLeft": int | null,
+    "myRegistrationStatus": "pending|confirmed|rejected|cancelled" | null
+  }]
+}</code></pre>
+
+  <p style="margin-top:0.6rem;font-size:0.85rem;color:var(--fg-muted);"><strong>Calcul du rang :</strong> agrégation <code>SUM(points)</code> groupée par <code>(lower(firstName), lower(lastName))</code>, identique au leaderboard public. Le joueur est matché par <code>player_id</code> OU par nom (insensible à la casse) pour englober les résultats publiés avant la création du compte cloud.</p>
+</div>
+
+</section>
+
+<!-- ============================================================
+     8. SUPERADMIN
+============================================================ -->
+<section id="admin">
+<h2>8. <code>/api/admin/*</code> — Superadmin cross-clubs</h2>
+<div class="group-intro">
+  Auth <span class="auth-pill auth-superadmin">JWT superadmin</span> (rôle requis + JWT valide). Réservé au super-admin global (Cédric).
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/admin/clubs</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=50&amp;offset=0&amp;status=&amp;q=&lt;search&gt;</code></dd>
+    <dt>Réponse</dt><dd><code>200 { clubs, limit, offset }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/admin/clubs</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "name": string, "plan": "solo|club|pro", "email"?, "notes"? }</code></dd>
+    <dt>Réponse</dt><dd><code>201 { club }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/admin/clubs/:id</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { club }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-PATCH">PATCH</span><span class="route-path">/api/admin/clubs/:id</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "name"?, "plan"?, "email"?, "notes"? }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { club }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/admin/clubs/:id/suspend</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "suspended" }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/admin/clubs/:id/unsuspend</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { status: "active" }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-DELETE">DELETE</span><span class="route-path">/api/admin/clubs/:id</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>204 No Content</code></dd>
+    <dt>Purpose</dt><dd>Soft delete (<code>status='deleted'</code>).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/admin/clubs/:id/members</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { members }</code></dd>
+    <dt>Purpose</dt><dd>Visibilité super-admin sur les membres d'un club tiers (audit).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/admin/licenses</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=50&amp;offset=0&amp;clubId=&amp;status=&amp;role=</code></dd>
+    <dt>Réponse</dt><dd><code>200 { licenses, limit, offset }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/admin/licenses</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "clubId": uuid, "role": "member|admin|superadmin", "expiresAt"? }</code></dd>
+    <dt>Réponse</dt><dd><code>201 { license, licenseKey, workerToken, syncStatus }</code></dd>
+    <dt>Purpose</dt><dd>Superadmin <strong>peut</strong> créer un <code>role=superadmin</code> (vs <code>/api/club/licenses</code> qui refuse).</dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-POST">POST</span><span class="route-path">/api/admin/licenses/:id/revoke</span></h3>
+  <dl>
+    <dt>Réponse</dt><dd><code>200 { license, syncStatus }</code></dd>
+  </dl>
+</div>
+
+<div class="route-block">
+  <h3><span class="route-method m-GET">GET</span><span class="route-path">/api/admin/audit</span></h3>
+  <dl>
+    <dt>Query</dt><dd><code>?limit=100&amp;offset=0&amp;clubId=&amp;actor=&amp;action=&amp;structureId=&amp;from=&amp;to=</code></dd>
+    <dt>Réponse</dt><dd><code>200 { entries, limit, offset }</code></dd>
+    <dt>Purpose</dt><dd>Audit cross-clubs (<code>structures_audit</code> non filtré).</dd>
+  </dl>
+</div>
+
+</section>
+
+<!-- ============================================================
+     RÉCAP PAR CONSOMMATEUR
+============================================================ -->
+<section>
+<h2>Récap rapide par stack consommateur</h2>
+
+<h3>App WPF desktop (StackPilot/PokClock)</h3>
+<ul>
+  <li><code>POST /api/auth/issue</code> au démarrage (license → JWT)</li>
+  <li><code>GET|POST|PATCH|DELETE /api/structures/*</code> (CRUD blinds)</li>
+  <li><code>POST /api/club/tournaments</code> (publish UPSERT depuis l'app)</li>
+  <li><code>POST /api/club/tournaments/:id/results</code> (publication des résultats)</li>
+  <li><code>POST /api/club/tournaments/:id/close</code></li>
+  <li><code>GET /api/club/audit</code>, <code>GET /api/club/members</code>, etc.</li>
+</ul>
+
+<h3>Site Next.js (pokclock-react)</h3>
+<ul>
+  <li><strong>SSR anonyme</strong> : <code>GET /public/clubs/:slug/*</code></li>
+  <li><strong>Auth joueur</strong> : <code>POST /api/players/auth/magic-link</code>, <code>GET /verify</code>, <code>GET /api/players/auth/google/start|callback</code></li>
+  <li><strong>Espace joueur</strong> : <code>GET|PATCH|DELETE /api/players/me</code>, <code>GET /api/players/me/{registrations,clubs,dashboard,google-calendar}</code>, <code>POST /api/players/me/clubs/:slug/{join,tournaments/:id/register}</code>, etc.</li>
+</ul>
+
+<h3>Worker Cloudflare (license verification)</h3>
+<ul>
+  <li>N'appelle pas l'API. C'est l'inverse : <code>POST /api/auth/issue</code> appelle le Worker pour vérifier <code>(licenseKey, hardwareId, workerToken)</code> contre D1.</li>
+</ul>
+
+</section>
+
+<footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
+  <p>Référence API PokClock · Source : <a href="https://github.com/cedricleblond35/pokclock-api/blob/main/internal/api/router.go"><code>internal/api/router.go</code></a> · Documents sources : <a href="architecture.html">Architecture</a> · <a href="database-schema.html">DB Schema</a> · <a href="../doc-ia/API_ROUTES.md">Version MD pour AI</a></p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  hljs.highlightAll();
+</script>
+</body>
+</html>

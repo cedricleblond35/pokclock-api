@@ -15,15 +15,16 @@ PokClock = système de gestion de tournois de poker, **3 repos** :
 
 **Service en prod** : `https://api.pokclock.com` (VPS OVH Swarm), `https://pokclock.com` (site), Worker Cloudflare `pokclock-license.dynamidoxa.workers.dev`.
 
-Phases livrées en mai 2026 : `0.A` foundation → `0.G` saisons. Détail dans `PHASE-0B-OPS-ROADMAP.md`.
+Phases livrées en mai 2026 : `0.A` foundation → `0.I` dashboard agrégé. Détail dans `PHASE-0B-OPS-ROADMAP.md`.
 
 ## Fichiers de ce dossier
 
 | Fichier | Contenu | Quand le lire |
 |---|---|---|
+| [`API_ROUTES.md`](API_ROUTES.md) | Référence exhaustive des routes HTTP (~60) : méthode, path, auth, body, réponse, codes erreur, rôle | Avant d'appeler une route depuis WPF/Next.js ou d'ajouter un endpoint |
 | [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) | 13 tables Postgres, colonnes, FK, index, qui-tape-quoi par endpoint | Avant toute modif DB ou nouveau handler |
 | [`PLAYERS_DATA_STORAGE.md`](PLAYERS_DATA_STORAGE.md) | Stockage joueurs + RGPD (DELETE /me, anonymisation, backups) | Quand le sujet touche aux comptes joueurs, à la conformité, ou aux backups |
-| [`PHASE-0B-OPS-ROADMAP.md`](PHASE-0B-OPS-ROADMAP.md) | Bilans cumulés des phases 0.B → 0.G, état config VPS, reste à faire | Pour comprendre l'historique récent et identifier les chantiers ouverts |
+| [`PHASE-0B-OPS-ROADMAP.md`](PHASE-0B-OPS-ROADMAP.md) | Bilans cumulés des phases 0.B → 0.I, état config VPS, reste à faire | Pour comprendre l'historique récent et identifier les chantiers ouverts |
 
 ## Memory shortcuts
 
@@ -42,7 +43,7 @@ Les phases sont nommées `0.X[.lettre[.chiffre]]` :
 
 ## Routes API — vue cathédrale
 
-Backend Go (`pokclock-api`) expose 4 groupes de routes :
+Backend Go (`pokclock-api`) expose 8 groupes de routes (référence complète : [`API_ROUTES.md`](API_ROUTES.md)) :
 
 ```
 /api/health                          GET    public
@@ -55,6 +56,7 @@ Backend Go (`pokclock-api`) expose 4 groupes de routes :
 /api/players/me/*                    GET/PATCH/DELETE  cookie pokclock_player
 /api/players/me/clubs/*              POST/DELETE  adhésions clubs
 /api/players/me/google-calendar/*    OAuth scope calendar.events
+/api/players/me/dashboard            GET    widgets agrégés par club actif (Phase 0.I)
 
 /public/clubs/:slug/*                GET/POST  public anonyme (lecture + inscription)
 /public/clubs/:slug/seasons/*        GET       leaderboard scopé saison
@@ -67,7 +69,7 @@ Backend Go (`pokclock-api`) expose 4 groupes de routes :
 /api/admin/*                         GET/POST/PATCH/DELETE  JWT role superadmin (cross-clubs)
 ```
 
-Inventaire complet dans `../README.md` du repo (section Endpoints).
+Inventaire complet avec params/body/codes erreur : [`API_ROUTES.md`](API_ROUTES.md).
 
 ## Tables Postgres au 2026-05-28
 
@@ -121,7 +123,7 @@ Voir [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) pour le détail colonne par colo
 
 ## État des chantiers (mai 2026)
 
-**Shippé** : 0.A foundation, 0.B RBAC + ops, 0.C members, 0.D tournois publiés (+ γ.1 barème, γ.3 formule custom), 0.E joueurs (magic link + Google OAuth + Calendar + RGPD), 0.F adhésions + members_only, 0.G saisons, 0.H auto-link compte joueur ↔ clubs via emailHash.
+**Shippé** : 0.A foundation, 0.B RBAC + ops, 0.C members, 0.D tournois publiés (+ γ.1 barème, γ.3 formule custom), 0.E joueurs (magic link + Google OAuth + Calendar + RGPD), 0.F adhésions + members_only, 0.G saisons, 0.H auto-link compte joueur ↔ clubs via emailHash, 0.I dashboard joueur agrégé par club (rang + saison active + 3 prochains tournois + inscription en un clic).
 
 **Pending** :
 - Stripe Checkout (besoin compte + clés API)

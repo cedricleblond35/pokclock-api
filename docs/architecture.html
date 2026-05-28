@@ -27,6 +27,7 @@
       <li><a href="index.html">Référence technique principale</a></li>
       <li class="active"><a href="architecture.html">Architecture &amp; diagrammes</a></li>
       <li><a href="use-cases.html">Cas d'usage par acteur</a></li>
+      <li><a href="api-routes.html">Référence API HTTP</a></li>
       <li><a href="database-schema.html">Schéma base de données</a></li>
       <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
       <li><a href="phase-0b-bilan.html">Phase 0.B → 0.G</a></li>
@@ -49,6 +50,7 @@
       <li><a href="#registration-state">11. États inscription</a></li>
       <li><a href="#membership-state">12. États adhésion</a></li>
       <li><a href="#autolink">13. Auto-link emailHash (0.H)</a></li>
+      <li><a href="#dashboard">14. Dashboard joueur (0.I)</a></li>
     </ul>
   </div>
 </aside>
@@ -60,7 +62,7 @@
   <p>Vue technique complète de l'écosystème PokClock : 3 repos, services Cloudflare, Postgres VPS, Resend, Google OAuth. Sequence diagrams pour chaque flow d'authentification et de données.</p>
   <div class="meta">
     <span><strong>Dernière maj</strong> 2026-05-28</span>
-    <span><strong>Phases couvertes</strong> 0.A → 0.G</span>
+    <span><strong>Phases couvertes</strong> 0.A → 0.I</span>
   </div>
 </div>
 
@@ -838,8 +840,72 @@ Test rapide : <code>sha256("test@example.com")</code> = <code>973dfe463ec85785f5
 
 </section>
 
+<!-- ============================================================
+     14. DASHBOARD JOUEUR AGRÉGÉ (Phase 0.I)
+============================================================ -->
+<section id="dashboard">
+<h2>14. Dashboard joueur agrégé par club (Phase 0.I)</h2>
+
+<p>
+Quand un joueur ouvre <code>/joueurs/dashboard</code>, il voit <strong>un widget par club</strong> où il est <em>membre actif</em>. Chaque widget agrège son rang dans le club, la saison active courante avec son rang scopé, et les 3 prochains tournois avec son statut d'inscription. L'objectif est de transformer le dashboard d'une simple liste plate en un tableau de bord par communauté.
+</p>
+
+<h3>Endpoint backend</h3>
+<p>
+<code>GET /api/players/me/dashboard</code> (handler <a href="api-routes.html#players-me"><code>playersDashboardHandler.getDashboard</code></a>). Auth via cookie <code>pokclock_player</code>. Retourne <code>{ widgets: [ClubWidget...] }</code> trié par dernière activité du club (max <code>start_at</code> des tournois publiés, fallback <code>requested_at</code> de la membership si aucun tournoi).
+</p>
+
+<h3>Calcul du rang du joueur</h3>
+<p>
+Pour rester cohérent avec le leaderboard public (<code>GET /public/clubs/:slug/leaderboard</code>), l'agrégation groupe les résultats par <code>(lower(first_name), lower(last_name))</code>. Le joueur est identifié dans <code>tournament_results</code> par <strong><code>player_id = $playerID</code> OU par match sur prénom/nom</strong> (insensible à la casse) — cela couvre le cas où l'admin a publié les résultats <em>avant</em> que le joueur ait créé son compte cloud.
+</p>
+
+<div class="mermaid">
+flowchart TB
+  Start(["GET /api/players/me/dashboard"]):::query
+
+  subgraph step1["1\. Liste des clubs actifs"]
+    Q1[("SELECT clubs<br/>WHERE memberships.status = 'active'<br/>ORDER BY max(start_at) DESC")]
+  end
+
+  subgraph step2["2\. Pour chaque club, en parallèle"]
+    direction LR
+    QRank[("Rang global<br/>= count(entries.points > my_points) + 1")]
+    QSeason[("Saison active<br/>seasons.status='active'<br/>LIMIT 1")]
+    QUpcoming[("3 prochains tournois<br/>status='open' AND start_at > now()<br/>LIMIT 3")]
+    QSeasonRank[("Rang scopé saison<br/>= count > my_points filtre season_id")]
+  end
+
+  subgraph step3["3\. Réponse"]
+    Resp[["widgets: [<br/>  { club, myRank, activeSeason: { myRank }, upcomingTournaments: [...] }<br/>]"]]
+  end
+
+  Start --> Q1 --> QRank --> Resp
+  Q1 --> QSeason --> QSeasonRank --> Resp
+  Q1 --> QUpcoming --> Resp
+
+  classDef query fill:#1f2937,stroke:#58a6ff,color:#c9d1d9;
+</div>
+
+<h3>Composant frontend</h3>
+<p>
+Le composant React <code>&lt;ClubWidget&gt;</code> est un <strong>client component</strong> ("use client") pour gérer l'état local du bouton "S'inscrire" en deux temps (clic → "Confirmer/Annuler" → POST <code>/api/players/me/clubs/:slug/tournaments/:id/register</code>). Si le joueur est déjà inscrit à un tournoi listé, le bouton est remplacé par un badge de statut (En attente / Confirmée). Un bouton "Quitter ce club" en bas du widget appelle la server action existante <code>leaveClubAction</code>.
+</p>
+
+<h3>Memberships non-actives</h3>
+<p>
+Les memberships <code>status='pending'</code> ou <code>status='rejected'</code> ne sont <strong>pas</strong> incluses dans <code>/dashboard</code>. La page <code>/joueurs/dashboard</code> les affiche en-dessous des widgets avec un composant simplifié <code>&lt;MembershipCard&gt;</code> (juste nom du club + statut + bouton "Annuler ma demande"). Cette séparation évite d'exposer rang+saison+tournois à un joueur dont l'adhésion n'est pas encore validée.
+</p>
+
+<h3>Performance &amp; N+1</h3>
+<p>
+L'endpoint fait <strong>1 + 4·N requêtes</strong> où N = nombre de clubs actifs du joueur (souvent 1-3) : une liste de clubs, puis pour chaque club : rang global (2 queries : my_stats + better_count), saison active (1 query), rang saison (2 queries), upcoming tournaments (1 query). À l'échelle attendue (N ≤ 5 clubs/joueur, p99 latence DB &lt; 5ms par query), c'est acceptable. Si le N+1 devient un problème (joueur "collectionneur" avec 20+ clubs), on peut consolider en UNION ALL ou matérialiser les leaderboards.
+</p>
+
+</section>
+
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
-  <p>Architecture PokClock · Documents sources : <a href="database-schema.html">DB Schema</a> · <a href="players-data-storage.html">Joueurs &amp; RGPD</a> · <a href="phase-0b-bilan.html">Bilan phases</a> · <a href="index.html">Référence technique</a></p>
+  <p>Architecture PokClock · Documents sources : <a href="database-schema.html">DB Schema</a> · <a href="api-routes.html">Référence API</a> · <a href="players-data-storage.html">Joueurs &amp; RGPD</a> · <a href="phase-0b-bilan.html">Bilan phases</a> · <a href="index.html">Référence technique</a></p>
 </footer>
 
 </main>

@@ -25,6 +25,7 @@
       <li><a href="index.html">Référence technique principale</a></li>
       <li><a href="architecture.html">Architecture &amp; diagrammes</a></li>
       <li class="active"><a href="use-cases.html">Cas d'usage par acteur</a></li>
+      <li><a href="api-routes.html">Référence API HTTP</a></li>
       <li><a href="database-schema.html">Schéma base de données</a></li>
       <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
       <li><a href="phase-0b-bilan.html">Phase 0.B → 0.G</a></li>
@@ -43,6 +44,7 @@
     <p style="font-size:0.75rem;color:var(--fg-muted);text-transform:uppercase;letter-spacing:0.05em;margin:1rem 0 0.5rem;">Scénarios</p>
     <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;line-height:1.7;">
       <li><a href="#scenario-autolink">🔗 Auto-link joueur (Phase 0.H)</a></li>
+      <li><a href="#scenario-dashboard">📊 Dashboard agrégé (Phase 0.I)</a></li>
     </ul>
   </div>
 </aside>
@@ -555,8 +557,106 @@ sequenceDiagram
 
 </section>
 
+<!-- ============================================================
+     SCÉNARIO : DASHBOARD JOUEUR AGRÉGÉ (Phase 0.I)
+============================================================ -->
+<section id="scenario-dashboard">
+<h2>📊 Scénario — Dashboard joueur agrégé par club (Phase 0.I)</h2>
+
+<p>
+<strong>Problème résolu</strong> : avant 0.I, le dashboard d'un joueur était une liste plate de ses adhésions + une liste plate de ses inscriptions. Pour voir son rang dans un club, il devait naviguer vers la page leaderboard du club, et idem pour vérifier la saison en cours ou les prochains tournois. Avec 0.I, chaque club actif a son propre widget concentré : rang, saison active, prochains tournois avec inscription en un clic.
+</p>
+
+<h3>Narratif</h3>
+
+<p><strong>Personae</strong> :</p>
+<ul>
+  <li><strong>Sophie</strong> : joueuse régulière du club "Poker Club Bordeaux" (rang #4 sur 27 entrées, 312 points), occasionnelle au "Club de la Garonne". Membre active des deux.</li>
+  <li><strong>Le club PCB</strong> : a une saison "Printemps 2026" en cours (active), 3 tournois à venir dans les 2 prochaines semaines.</li>
+</ul>
+
+<table>
+  <thead><tr><th>T</th><th>Action</th><th>État système</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>T0</td>
+      <td>Sophie clique sur "Mon compte" depuis l'app pokclock.com.</td>
+      <td>Le serveur Next.js fait <code>GET /api/players/me/dashboard</code> avec son cookie session.</td>
+    </tr>
+    <tr>
+      <td>T1</td>
+      <td>Le backend liste ses 2 memberships actives, calcule le rang dans chaque club, fetch la saison active, fetch les 3 prochains tournois.</td>
+      <td>Réponse <code>200 { widgets: [pcb, garonne] }</code>, tri par dernière activité (PCB a un tournoi demain, Garonne le mois prochain → PCB en premier).</td>
+    </tr>
+    <tr>
+      <td>T2</td>
+      <td>Sophie voit le widget PCB en haut. À droite : <strong>#4 / 27</strong> en jaune doré. Encadré ambre "Saison en cours · Printemps 2026", où elle est <strong>#3 sur 18</strong> (depuis le début de la saison).</td>
+      <td>Le widget liste "Mercredi 30 mai · 19:00 - Tournoi Hold'em" avec bouton <em>S'inscrire</em>.</td>
+    </tr>
+    <tr>
+      <td>T3</td>
+      <td>Elle clique <em>S'inscrire</em>. Le bouton se transforme en "Confirmer / Annuler".</td>
+      <td>État local du composant. Pas encore d'appel réseau.</td>
+    </tr>
+    <tr>
+      <td>T4</td>
+      <td>Elle clique <em>Confirmer</em>. Le composant appelle la server action <code>registerAsPlayerAction</code> qui POST <code>/api/players/me/clubs/poker-club-bordeaux/tournaments/&lt;uuid&gt;/register</code>.</td>
+      <td>Le backend crée une <code>tournament_registration status='pending', player_id=Sophie.id</code>. Réponse <code>201</code>.</td>
+    </tr>
+    <tr>
+      <td>T5</td>
+      <td>Le bouton est remplacé par "En attente" en jaune doré. Le tournoi reste dans la liste avec son nouveau statut.</td>
+      <td>L'admin du club voit la demande dans <code>GET /api/club/tournaments/:id/registrations?status=pending</code>.</td>
+    </tr>
+    <tr>
+      <td>T6</td>
+      <td>Quelques heures plus tard, l'admin valide. Sophie reçoit un email Resend.</td>
+      <td>Au prochain refresh du dashboard, <code>myRegistrationStatus</code> devient <code>"confirmed"</code> (vert).</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Données affichées dans un widget</h3>
+<ul>
+  <li><strong>En-tête</strong> : nom du club (lien vers la page club) + badge "Membre actif".</li>
+  <li><strong>Rang global</strong> à droite : position dans le classement cumulé du club (groupé par nom comme le leaderboard public). Affiche aussi total points + nombre de tournois joués.</li>
+  <li><strong>Encadré saison active</strong> (si une saison <code>status='active'</code> existe) : nom + date de fin + rang scopé saison.</li>
+  <li><strong>3 prochains tournois</strong> : nom + date + places libres + bouton/badge inscription.</li>
+  <li><strong>Lien "Quitter ce club"</strong> en bas (server action <code>leaveClubAction</code>).</li>
+</ul>
+
+<h3>Edge cases</h3>
+<ul>
+  <li><strong>Joueur sans résultats dans le club</strong> : <code>myRank=null</code> → on affiche "Pas encore de résultats enregistrés dans ce club".</li>
+  <li><strong>Aucune saison active</strong> : on omet simplement l'encadré ambre, pas de message d'erreur.</li>
+  <li><strong>Aucun tournoi à venir</strong> : "Aucun tournoi à venir annoncé."</li>
+  <li><strong>Tournoi members_only</strong> et joueur non membre actif → impossible normalement (les widgets ne sont rendus que pour les memberships actives), mais si le backend renvoie <code>403 members_only</code>, le message d'erreur s'affiche sous le bouton.</li>
+  <li><strong>Tournoi complet</strong> : <code>spotsLeft=0</code>, bouton désactivé.</li>
+  <li><strong>Memberships pending/rejected</strong> : pas dans <code>/dashboard</code>, affichées via le composant simple <code>&lt;MembershipCard&gt;</code> en dessous des widgets.</li>
+</ul>
+
+<h3>Touchpoints API</h3>
+<table>
+  <thead><tr><th>Acteur</th><th>Endpoint</th><th>Rôle</th></tr></thead>
+  <tbody>
+    <tr><td>Joueur</td><td><code>GET /api/players/me/dashboard</code></td><td>Récupère les widgets agrégés (1 par club actif)</td></tr>
+    <tr><td>Joueur</td><td><code>POST /api/players/me/clubs/:slug/tournaments/:id/register</code></td><td>Inscription en un clic depuis le widget</td></tr>
+    <tr><td>Joueur</td><td><code>DELETE /api/players/me/clubs/:slug</code></td><td>"Quitter ce club" (server action)</td></tr>
+    <tr><td>Joueur</td><td><code>GET /api/players/me/clubs</code></td><td>Memberships non-actives (pending/rejected) affichées séparément</td></tr>
+    <tr><td>Admin club</td><td><code>POST /api/club/registrations/:id/confirm</code></td><td>Valide l'inscription, déclenche email + Calendar sync</td></tr>
+  </tbody>
+</table>
+
+<h3>Voir aussi</h3>
+<ul>
+  <li><a href="architecture.html#dashboard">Architecture § 14 — Dashboard joueur</a> pour le détail technique (queries SQL, sequence diagram)</li>
+  <li><a href="api-routes.html#players-me">Référence API § Espace joueur</a> pour la structure exacte de <code>ClubWidget</code></li>
+</ul>
+
+</section>
+
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
-  <p>PokClock · Cas d'usage par acteur · Cross-ref : <a href="architecture.html">Architecture</a> · <a href="database-schema.html">Schéma DB</a></p>
+  <p>PokClock · Cas d'usage par acteur · Cross-ref : <a href="architecture.html">Architecture</a> · <a href="database-schema.html">Schéma DB</a> · <a href="api-routes.html">Référence API</a></p>
 </footer>
 
 </main>

@@ -18,9 +18,10 @@
       <li><a href="index.html">Référence technique principale</a></li>
       <li><a href="architecture.html">Architecture &amp; diagrammes</a></li>
       <li><a href="use-cases.html">Cas d'usage par acteur</a></li>
+      <li><a href="api-routes.html">Référence API HTTP</a></li>
       <li><a href="database-schema.html">DB Schema</a></li>
       <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
-      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.G</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.I</a></li>
     </ol>
   </nav>
 </aside>
@@ -31,7 +32,7 @@
   <div class="meta">
     <span><strong>3 repos</strong> pokclock-api · pokclock-react · StackPilot (WPF)</span>
     <span><strong>Live</strong> <a href="https://api.pokclock.com/api/health">api.pokclock.com</a></span>
-    <span><strong>Phases livrées</strong> 0.A → 0.G</span>
+    <span><strong>Phases livrées</strong> 0.A → 0.I</span>
   </div>
 </div>
 
@@ -63,8 +64,17 @@ Tu débarques sur le projet ? Lis dans l'ordre : <a href="architecture.html">Arc
     <div style="border:1px solid var(--accent);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
       <p style="margin:0;font-size:0.7rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;">⭐ Nouveau</p>
       <h3 style="margin-top:0.5rem;color:var(--accent);">Cas d'usage par acteur</h3>
-      <p style="color:var(--fg-muted);font-size:0.9rem;">5 acteurs (super-admin, admin de club, dealer, visiteur, joueur), leurs UC, écrans, et routes API. Inclut un user journey de la découverte à l'adhésion.</p>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">5 acteurs (super-admin, admin de club, dealer, visiteur, joueur), leurs UC, écrans, et routes API. Inclut un user journey de la découverte à l'adhésion + scénarios Phase 0.H auto-link et 0.I dashboard agrégé.</p>
       <p style="font-size:0.8rem;color:var(--fg-dim);">📄 use-cases.html</p>
+    </div>
+  </a>
+
+  <a href="api-routes.html" style="text-decoration:none;color:inherit;">
+    <div style="border:1px solid var(--accent);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
+      <p style="margin:0;font-size:0.7rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;">⭐ Nouveau</p>
+      <h3 style="margin-top:0.5rem;color:var(--accent);">Référence API HTTP</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Toutes les routes (~60) en référence exhaustive : méthode, chemin, auth, paramètres, body JSON, codes d'erreur, rôle métier. 8 groupes (système, auth desktop, structures, club admin, public, players auth, players me, superadmin).</p>
+      <p style="font-size:0.8rem;color:var(--fg-dim);">📄 api-routes.html</p>
     </div>
   </a>
 
@@ -94,8 +104,8 @@ Tu débarques sur le projet ? Lis dans l'ordre : <a href="architecture.html">Arc
 
   <a href="phase-0b-bilan.html" style="text-decoration:none;color:inherit;">
     <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;background:var(--bg-elev);">
-      <h3 style="margin-top:0;color:var(--accent);">Phase 0.B → 0.G — Bilans</h3>
-      <p style="color:var(--fg-muted);font-size:0.9rem;">Roadmap et bilans cumulés des phases 0.B (ops) / 0.C (members) / 0.D (tournois) / 0.E (joueurs) / 0.F (adhésions) / 0.G (saisons) livrées en mai 2026.</p>
+      <h3 style="margin-top:0;color:var(--accent);">Phase 0.B → 0.I — Bilans</h3>
+      <p style="color:var(--fg-muted);font-size:0.9rem;">Roadmap et bilans cumulés des phases 0.B (ops) / 0.C (members) / 0.D (tournois) / 0.E (joueurs) / 0.F (adhésions) / 0.G (saisons) / 0.H (auto-link emailHash) / 0.I (dashboard agrégé) livrées en mai 2026.</p>
       <p style="font-size:0.8rem;color:var(--fg-dim);">📄 phase-0b-bilan.html</p>
     </div>
   </a>
