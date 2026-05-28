@@ -289,6 +289,10 @@ func Mount(e *echo.Echo, d Deps) {
 	playersMeGroup.POST("/clubs/:slug/join", playersMembershipsH.joinClub)
 	playersMeGroup.DELETE("/clubs/:slug", playersMembershipsH.leaveClub)
 
+	// Phase 0.I : dashboard agrégé (un widget par club actif).
+	playersDashboardH := &playersDashboardHandler{pool: d.Pool, logger: d.Logger}
+	playersMeGroup.GET("/dashboard", playersDashboardH.getDashboard)
+
 	// /api/admin/* : routes super-admin (cross-clubs), réservées à Cédric.
 	// Double protection : JWT valide + claim role=superadmin.
 	adminGroup := e.Group("/api/admin")
