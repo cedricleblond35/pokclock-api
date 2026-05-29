@@ -45,12 +45,20 @@ services:
       # le site pokclock.com ne le voit jamais -> magic link ne connecte rien.
       PLAYER_COOKIE_DOMAIN: ".pokclock.com"
       API_BASE_URL: "https://api.pokclock.com"
+      # Phase 0.E.1.e : OAuth Google pour la connexion joueur "Continuer avec Google".
+      # Sans GOOGLE_OAUTH_CLIENT_ID, le bouton renvoie google_oauth_disabled.
+      # Le client ID n'est pas un secret (visible cote client OAuth), le secret oui.
+      # Setup cote Google Cloud Console : OAuth 2.0 Client ID (Web application),
+      # Authorized redirect URI = https://api.pokclock.com/api/players/auth/google/callback
+      GOOGLE_OAUTH_CLIENT_ID: "${GOOGLE_OAUTH_CLIENT_ID:-}"
+      GOOGLE_OAUTH_CLIENT_SECRET_FILE: "/run/secrets/google_oauth_client_secret"
     secrets:
       - pg_password_pokclock
       - jwt_private_pokclock
       - jwt_public_pokclock
       - worker_admin_token
       - resend_api_key
+      - google_oauth_client_secret
     networks:
       - nw-web
       - nw-pokclock
@@ -188,6 +196,8 @@ secrets:
   worker_admin_token:
     external: true
   resend_api_key:
+    external: true
+  google_oauth_client_secret:
     external: true
   restic_password:
     external: true
