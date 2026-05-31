@@ -164,6 +164,16 @@ Auth JWT staff + `requireAnyRole(admin, superadmin)` + scope club. Jamais cross-
 - **Réponse** : `200 { status: "revoked" }`
 - **Purpose** : Exclut un membre actif (active → revoked).
 
+### Roster persistant des membres (Phase 0.J)
+
+Push du roster des Player WPF avec `MembershipType=Member` vers le cloud, indépendamment de toute publication de tournoi. Permet l'auto-link Phase 0.H avant qu'un seul tournoi soit publié (cas du début de saison).
+
+#### PUT /api/club/roster
+- **Body** : `{ "members": [{ "firstName": string, "lastName": string, "nickname"?: string, "emailHash"?: string }] }`
+- **Réponse** : `200 { count: int }`
+- **Erreurs** : `400 invalid_body`, `401 not_authenticated`
+- **Purpose** : Idempotent. Remplace intégralement la colonne `clubs.member_roster` (JSONB). Les entrées sans `emailHash` sont conservées (membres sans email, comptés mais non auto-linkables). L'auto-link `autoLinkPlayerToClubs` scanne ce roster en UNION avec `published_tournaments.local_players`.
+
 ### Barème de points (Phase 0.D-γ.1)
 
 #### GET /api/club/point-scheme

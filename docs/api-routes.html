@@ -108,7 +108,7 @@
       <li class="active"><a href="api-routes.html">Référence API HTTP</a></li>
       <li><a href="database-schema.html">Schéma base de données</a></li>
       <li><a href="players-data-storage.html">Joueurs &amp; RGPD</a></li>
-      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.I</a></li>
+      <li><a href="phase-0b-bilan.html">Phase 0.B → 0.J</a></li>
     </ol>
   </nav>
 
@@ -134,7 +134,7 @@
   <p>Liste exhaustive des endpoints exposés par <code>pokclock-api</code> (Go/Echo). Pour chaque route : méthode, chemin, authentification requise, paramètres, body JSON, codes de réponse et rôle métier. Voir aussi <a href="../doc-ia/API_ROUTES.md">la version MD pour AI</a>.</p>
   <div class="meta">
     <span><strong>Dernière maj</strong> 2026-05-28</span>
-    <span><strong>Phases couvertes</strong> 0.A → 0.I</span>
+    <span><strong>Phases couvertes</strong> 0.A → 0.J</span>
     <span><strong>Source</strong> <code>internal/api/router.go</code></span>
   </div>
 </div>
@@ -414,6 +414,18 @@
     <dt>Body</dt><dd><code>{ "reason"?: string }</code></dd>
     <dt>Réponse</dt><dd><code>200 { status: "revoked" }</code></dd>
     <dt>Purpose</dt><dd>Exclusion d'un membre actif (active → revoked).</dd>
+  </dl>
+</div>
+
+<h3 style="margin-top:1.5rem;">Roster persistant des membres (Phase 0.J)</h3>
+
+<div class="route-block">
+  <h3><span class="route-method m-PUT">PUT</span><span class="route-path">/api/club/roster</span></h3>
+  <dl>
+    <dt>Body</dt><dd><code>{ "members": [{ "firstName": string, "lastName": string, "nickname"?: string, "emailHash"?: string }] }</code></dd>
+    <dt>Réponse</dt><dd><code>200 { count: int }</code></dd>
+    <dt>Erreurs</dt><dd><code>400 invalid_body</code>, <code>401 not_authenticated</code></dd>
+    <dt>Purpose</dt><dd>Push du roster des Player WPF avec <code>MembershipType=Member</code> vers le cloud, indépendamment de toute publication de tournoi. Idempotent (remplace intégralement <code>clubs.member_roster</code>). L'auto-link Phase 0.H scanne ce roster en UNION avec <code>published_tournaments.local_players</code>. Permet l'auto-link d'un nouveau membre avant qu'aucun tournoi ne soit publié (typique : début de saison).</dd>
   </dl>
 </div>
 

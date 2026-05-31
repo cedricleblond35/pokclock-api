@@ -51,6 +51,7 @@
       <li><a href="#membership-state">12. États adhésion</a></li>
       <li><a href="#autolink">13. Auto-link emailHash (0.H)</a></li>
       <li><a href="#dashboard">14. Dashboard joueur (0.I)</a></li>
+      <li><a href="#roster">15. Roster Member/Guest (0.J)</a></li>
     </ul>
   </div>
 </aside>
@@ -62,7 +63,7 @@
   <p>Vue technique complète de l'écosystème PokClock : 3 repos, services Cloudflare, Postgres VPS, Resend, Google OAuth. Sequence diagrams pour chaque flow d'authentification et de données.</p>
   <div class="meta">
     <span><strong>Dernière maj</strong> 2026-05-28</span>
-    <span><strong>Phases couvertes</strong> 0.A → 0.I</span>
+    <span><strong>Phases couvertes</strong> 0.A → 0.J</span>
   </div>
 </div>
 
@@ -901,6 +902,56 @@ Les memberships <code>status='pending'</code> ou <code>status='rejected'</code> 
 <p>
 L'endpoint fait <strong>1 + 4·N requêtes</strong> où N = nombre de clubs actifs du joueur (souvent 1-3) : une liste de clubs, puis pour chaque club : rang global (2 queries : my_stats + better_count), saison active (1 query), rang saison (2 queries), upcoming tournaments (1 query). À l'échelle attendue (N ≤ 5 clubs/joueur, p99 latence DB &lt; 5ms par query), c'est acceptable. Si le N+1 devient un problème (joueur "collectionneur" avec 20+ clubs), on peut consolider en UNION ALL ou matérialiser les leaderboards.
 </p>
+
+</section>
+
+<!-- ============================================================
+     15. ROSTER CLUB PERSISTANT + MEMBER/GUEST (Phase 0.J)
+============================================================ -->
+<section id="roster">
+<h2>15. Roster club persistant + Member/Guest (Phase 0.J)</h2>
+
+<p>
+<strong>Problème résolu</strong> : avant 0.J, l'auto-link (Phase 0.H) ne pouvait s'opérer que via le snapshot <code>local_players</code> des tournois <em>publiés</em>. Conséquence : un nouveau membre saisi en début de saison (avant tout tournoi en ligne) ne pouvait pas être auto-lié à son compte cloud — il fallait attendre la première publication d'un tournoi le concernant.
+</p>
+
+<h3>Mécanisme</h3>
+<ul>
+  <li>Nouvelle colonne <code>clubs.member_roster</code> (JSONB, migration 027) qui contient le roster complet des Player WPF avec <code>MembershipType=Member</code>.</li>
+  <li>Nouvel endpoint admin <code>PUT /api/club/roster</code> qui remplace intégralement cette colonne (idempotent).</li>
+  <li>WPF (<code>PlayersView.SyncRosterToCloudAsync</code>) appelle ce endpoint en background à chaque création/édition d'un joueur. Fire-and-forget, échec silencieux pour ne pas casser le flow UI.</li>
+  <li><code>autoLinkPlayerToClubs</code> côté backend scanne désormais <strong>deux sources en UNION</strong> :
+    <ol>
+      <li><code>published_tournaments.local_players</code> (existant Phase 0.H)</li>
+      <li><code>clubs.member_roster</code> (nouveau Phase 0.J)</li>
+    </ol>
+  </li>
+  <li>Le résultat alimente les mêmes pending memberships qu'avant. L'admin valide d'un clic comme pour 0.H.</li>
+</ul>
+
+<h3>Distinction Member / Guest côté WPF</h3>
+<p>
+La fiche joueur côté WPF ajoute un champ <code>MembershipType</code> (enum <code>Member</code> ou <code>Guest</code>, défaut Member pour back-compat). Migration EF Core <code>20260528175914_AddPlayerMembershipType</code> qui ajoute une colonne sur la table locale SQLite.
+</p>
+<table>
+  <thead><tr><th>Type</th><th>Push <code>emailHash</code> cloud ?</th><th>Auto-link possible ?</th><th>Cas d'usage</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Member</strong></td><td>✓ Oui (via roster + via local_players)</td><td>✓ Oui</td><td>Joueur régulier du club, sur le leaderboard, payant cotisation éventuelle</td></tr>
+    <tr><td><strong>Guest</strong></td><td>✗ Non (omis au build de <code>LocalPlayerRecord</code>)</td><td>✗ Non</td><td>Joueur invité ponctuel, ami d'un membre, soirée publique, tournoi caritatif</td></tr>
+  </tbody>
+</table>
+
+<h3>Auto-link au refresh dashboard (rappel Phase 0.I)</h3>
+<p>
+Phase 0.I avait déjà étendu le déclenchement de <code>autoLinkPlayerToClubs</code> au chargement du dashboard joueur (en plus du login). Combiné à 0.J, le flow attendu devient : admin saisit Cedric comme <em>Member</em> côté WPF → roster pushé en background → Cedric refresh son dashboard sur pokclock.com → la pending membership apparait. Aucun délai humain, aucune nouvelle connexion requise.
+</p>
+
+<h3>Limitations</h3>
+<ul>
+  <li>L'auto-link reste subordonné à <strong>validation admin</strong> côté MEMBRES JOUEURS — il crée une <code>pending</code>, pas une <code>active</code>.</li>
+  <li>Si l'admin oublie d'aller dans la fiche WPF pour basculer un Guest en Member rétroactivement, l'historique reste invisible côté cloud (les snapshots passés contiennent déjà <code>emailHash: null</code>).</li>
+  <li>Pas de bouton "Sync roster" manuel dans la UI WPF — le sync se déclenche uniquement au save d'un joueur. Si le roster est désynchronisé pour une raison (rebuild DB locale), il faut éditer-sauver un joueur quelconque pour retrigger.</li>
+</ul>
 
 </section>
 

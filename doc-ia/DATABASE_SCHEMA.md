@@ -95,12 +95,13 @@ Postgres 16-alpine, service Swarm `pokclock-api_postgres` sur VPS OVH `vps-eb941
 | `status` | text NOT NULL | `active` / `suspended` / `deleted`, default `active` |
 | `notes` | text NULL | Notes internes admin |
 | `online_registrations_enabled` | bool NOT NULL | Opt-in pour les inscriptions en ligne. Ajouté en 008. Default `false` |
+| `member_roster` | jsonb NOT NULL DEFAULT `'[]'` | Phase 0.J. Roster des Player WPF avec `MembershipType=Member`. Pushed via `PUT /api/club/roster` à chaque save d'un Member côté WPF. Scanné par `autoLinkPlayerToClubs` en UNION avec `published_tournaments.local_players` pour créer les pending memberships avant qu'aucun tournoi ne soit publié. Structure : array de `{firstName, lastName, nickname?, emailHash?}`. Ajouté en 027 |
 | `created_at`, `updated_at` | timestamptz | Trigger `set_updated_at` |
 | `suspended_at` | timestamptz NULL | Renseigné au passage `active → suspended` |
 
-Index : `idx_clubs_status`, `idx_clubs_plan`, `idx_clubs_slug` (UNIQUE).
+Index : `idx_clubs_status`, `idx_clubs_plan`, `idx_clubs_slug` (UNIQUE), `clubs_member_roster_gin_idx` (GIN pour les queries `jsonb_array_elements`).
 
-Migrations : 003 (create), 008 (slug + online_registrations_enabled).
+Migrations : 003 (create), 008 (slug + online_registrations_enabled), 027 (member_roster).
 
 ### Qui tape sur `clubs`
 

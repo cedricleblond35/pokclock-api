@@ -65,6 +65,7 @@ Backend Go (`pokclock-api`) expose 8 groupes de routes (référence complète : 
 /api/club/*                          GET/POST/PATCH/DELETE  JWT desktop + role admin
                                      (members, licenses, tournaments, registrations,
                                       point-scheme, memberships, seasons, audit)
+/api/club/roster                     PUT    push roster Member-only (Phase 0.J)
 
 /api/admin/*                         GET/POST/PATCH/DELETE  JWT role superadmin (cross-clubs)
 ```
@@ -123,7 +124,7 @@ Voir [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) pour le détail colonne par colo
 
 ## État des chantiers (mai 2026)
 
-**Shippé** : 0.A foundation, 0.B RBAC + ops, 0.C members, 0.D tournois publiés (+ γ.1 barème, γ.3 formule custom), 0.E joueurs (magic link + Google OAuth + Calendar + RGPD), 0.F adhésions + members_only, 0.G saisons, 0.H auto-link compte joueur ↔ clubs via emailHash, 0.I dashboard joueur agrégé par club (rang + saison active + 3 prochains tournois + inscription en un clic).
+**Shippé** : 0.A foundation, 0.B RBAC + ops, 0.C members, 0.D tournois publiés (+ γ.1 barème, γ.3 formule custom), 0.E joueurs (magic link + Google OAuth + Calendar + RGPD), 0.F adhésions + members_only, 0.G saisons, 0.H auto-link compte joueur ↔ clubs via emailHash, 0.I dashboard joueur agrégé par club (rang + saison active + 3 prochains tournois + inscription en un clic), 0.J roster club persistant (PUT /api/club/roster) + distinction Member/Guest côté WPF, auto-link sans tournoi publié.
 
 **Pending** :
 - Stripe Checkout (besoin compte + clés API)
