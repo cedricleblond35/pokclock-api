@@ -791,6 +791,65 @@ tout intégré : observabilité tech + gestion des clubs + licenses + audit.</p>
 <li>Le match ne fonctionne que si le club a publié au moins UN tournoi avec ce joueur dans <code>local_players</code> (donc avec <code>show_players=true</code> au moment du publish, ou avec <code>localPlayers</code> poussé de toute façon)</li>
 </ul>
 
+<h2>Update 2026-05-28 (suite) — Phase 0.I (dashboard joueur agrégé)</h2>
+<h3>Phase 0.I Dashboard agrégé par club côté joueur</h3>
+<p>Le dashboard <code>/joueurs/dashboard</code> sur pokclock.com devient un vrai tableau de bord par communauté : un widget enrichi par club où le joueur est membre actif, avec son rang dans le leaderboard global, la saison en cours + son rang scopé saison, et les 3 prochains tournois avec inscription en un clic. Endpoint <code>GET /api/players/me/dashboard</code> qui agrège tout en une seule réponse JSON.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><code>internal/api/players_dashboard.go</code></td><td>x</td><td>Handler <code>playersDashboardHandler.getDashboard</code> + helpers <code>computeRank</code>, <code>fetchActiveSeason</code>, <code>fetchUpcoming</code></td></tr>
+<tr><td>Route <code>GET /api/players/me/dashboard</code></td><td>x</td><td>JWT player requis (cookie pokclock_player)</td></tr>
+<tr><td>Calcul rang : match par <code>player_id</code> OU par nom (lower)</td><td>x</td><td>Englobe les résultats publiés avant création du compte cloud</td></tr>
+<tr><td>Auto-link retriggered au chargement dashboard</td><td>x</td><td>Idempotent (ON CONFLICT DO NOTHING). Permet l'apparition d'une nouvelle adhésion sans re-login après publication d'un tournoi</td></tr>
+<tr><td>Tri clubs : dernière activité DESC</td><td>x</td><td><code>MAX(t.start_at)</code> des tournois du club, fallback <code>m.requested_at</code></td></tr>
+<tr><td>Composant <code>ClubWidget.tsx</code> côté frontend</td><td>x</td><td>Rang en gros + encadré saison ambre + 3 prochains tournois avec bouton inscription deux temps</td></tr>
+<tr><td>Memberships pending/rejected exclues</td><td>x</td><td>Affichées séparément en dessous des widgets via <code>MembershipCard</code> simple</td></tr>
+</tbody>
+</table>
+<p><strong>Performance</strong> : 1 + 4·N requêtes (N = nb clubs actifs du joueur, typiquement 1-3). Acceptable à l'échelle attendue, optimisable en UNION ALL ou matérialisation si besoin.</p>
+
+<h2>Update 2026-05-28 (suite) — Phase 0.J (roster persistant + Member/Guest)</h2>
+<h3>Phase 0.J Roster club persistant + auto-link sans tournoi publié</h3>
+<p>Avant 0.J, l'auto-link Phase 0.H ne pouvait s'opérer qu'au moment où un tournoi était publié (le hash arrivait via <code>published_tournaments.local_players</code>). Un nouveau membre saisi en début de saison restait invisible côté cloud tant qu'aucun tournoi ne le contenait. 0.J introduit un roster permanent par club, pushed à chaque save d'un Member côté WPF.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Livré</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>Migration <code>027_clubs_member_roster.sql</code></td><td>x</td><td>Colonne <code>clubs.member_roster</code> (jsonb NOT NULL DEFAULT '[]') + index GIN</td></tr>
+<tr><td><code>internal/api/club_roster.go</code> + endpoint <code>PUT /api/club/roster</code></td><td>x</td><td>Idempotent, normalise les entries, JWT staff requis</td></tr>
+<tr><td>Extension <code>autoLinkPlayerToClubs</code></td><td>x</td><td>UNION entre <code>published_tournaments.local_players</code> et <code>clubs.member_roster</code></td></tr>
+<tr><td>WPF : enum <code>MembershipType</code> (Member / Guest)</td><td>x</td><td>Default Member pour back-compat. Migration EF <code>20260528175914_AddPlayerMembershipType</code></td></tr>
+<tr><td>WPF : ComboBox dans <code>PlayerFormWindow.xaml</code></td><td>x</td><td>Visible sur fiche joueur ligne « Type d'adhésion »</td></tr>
+<tr><td>WPF : filtre Guest au publish</td><td>x</td><td><code>BuildLocalPlayersListAsync</code> omet l'emailHash des Guest</td></tr>
+<tr><td>WPF : <code>SyncRosterToCloudAsync</code> dans <code>PlayersView</code></td><td>x</td><td>Fire-and-forget au Create/Update d'un Member. CTS 8s timeout. Échec silencieux</td></tr>
+<tr><td>WPF : fix UI MEMBRES JOUEURS</td><td>x</td><td>RowHeight=50, MinHeight buttons 30, override du style implicite DataGrid</td></tr>
+<tr><td>WPF : fix shutdown <code>ObjectDisposedException</code></td><td>x</td><td>try/catch autour de <code>ServiceProvider.Dispose()</code> dans <code>AppBootstrap.Shutdown</code></td></tr>
+</tbody>
+</table>
+<p><strong>Privacy / RGPD</strong> :</p>
+<ul>
+<li>Toujours uniquement le hash SHA-256 qui transite, jamais l'email en clair</li>
+<li>Les <code>Guest</code> n'ouvrent pas le pont cloud : leur emailHash n'est ni dans <code>local_players</code> ni dans <code>member_roster</code></li>
+<li>Le roster est remplacé intégralement à chaque save → suppression d'un membre côté WPF retire son hash du cloud à la prochaine sync</li>
+</ul>
+<p><strong>Limitations</strong> :</p>
+<ul>
+<li>Pas de bouton « Sync roster maintenant » dans l'UI WPF. Si le sync auto échoue (réseau down) et qu'aucun joueur n'est édité après, il faut éditer-sauver un joueur quelconque pour retrigger</li>
+<li>L'auto-link reste subordonné à validation admin (création d'une <code>pending</code> en MEMBRES JOUEURS, pas une <code>active</code>)</li>
+<li>Un joueur basculé Guest → Member rétroactivement n'apparait pas dans l'historique des snapshots passés (les <code>local_players</code> des tournois déjà publiés contiennent <code>emailHash: null</code> figé)</li>
+</ul>
+
 
 <footer style="margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);color:var(--fg-dim);font-size:0.85rem;">
   <p>pokclock-api · Documentation auto-générée depuis les .md de doc-ia/.</p>

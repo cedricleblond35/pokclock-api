@@ -45,6 +45,7 @@
     <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;line-height:1.7;">
       <li><a href="#scenario-autolink">🔗 Auto-link joueur (Phase 0.H)</a></li>
       <li><a href="#scenario-dashboard">📊 Dashboard agrégé (Phase 0.I)</a></li>
+      <li><a href="#scenario-roster">🎯 Member vs Guest + roster (Phase 0.J)</a></li>
     </ul>
   </div>
 </aside>
@@ -651,6 +652,101 @@ sequenceDiagram
 <ul>
   <li><a href="architecture.html#dashboard">Architecture § 14 — Dashboard joueur</a> pour le détail technique (queries SQL, sequence diagram)</li>
   <li><a href="api-routes.html#players-me">Référence API § Espace joueur</a> pour la structure exacte de <code>ClubWidget</code></li>
+</ul>
+
+</section>
+
+<!-- ============================================================
+     SCÉNARIO : MEMBER vs GUEST + ROSTER PERSISTANT (Phase 0.J)
+============================================================ -->
+<section id="scenario-roster">
+<h2>🎯 Scénario — Member vs Guest + roster persistant (Phase 0.J)</h2>
+
+<p>
+<strong>Problème résolu</strong> : avant 0.J, l'auto-link Phase 0.H ne pouvait s'opérer qu'au moment où l'admin publiait un tournoi contenant le joueur. Un nouveau membre saisi en début de saison (avant tout tournoi en ligne) restait invisible côté cloud. Et tout le monde était traité de la même façon : qu'on saisisse un membre régulier ou un joueur de passage, le hash partait au cloud.
+</p>
+
+<h3>Narratif</h3>
+
+<p><strong>Personae</strong> :</p>
+<ul>
+  <li><strong>Pierre, admin du Poker Club Bordeaux</strong> : début de saison, il ajoute 4 nouveaux adhérents qui viennent de payer leur cotisation. Aucun tournoi n'a encore été publié pour cette saison.</li>
+  <li><strong>Marc, ami occasionnel d'un membre</strong> : invité pour un freeroll public ce week-end. Pierre veut le saisir pour gérer son inscription au tournoi, mais sans lui ouvrir un lien permanent avec le club côté cloud.</li>
+</ul>
+
+<table>
+  <thead><tr><th>T</th><th>Action côté WPF (Pierre)</th><th>Effet cloud</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>T0</td>
+      <td>Pierre ouvre la fiche du nouvel adhérent <em>Sophie Dubois</em>, renseigne son email <code>sophie.dubois@example.com</code>, laisse <strong>Type d'adhésion = Membre du club</strong> (défaut). Clique Sauvegarder.</td>
+      <td>Au save, WPF déclenche <code>SyncRosterToCloudAsync</code> en background : PUT <code>/api/club/roster</code> avec la liste complète des Member actifs (incluant Sophie avec son <code>emailHash</code>). Le backend update <code>clubs.member_roster</code>.</td>
+    </tr>
+    <tr>
+      <td>T1</td>
+      <td>Pierre saisit Marc dans la même foulée, mais cette fois bascule <strong>Type d'adhésion = Joueur invité</strong>.</td>
+      <td>Le sync part aussi, mais cette fois <code>BuildLocalPlayersListAsync</code> et le filtre du roster excluent Marc (Guest). Son hash n'arrive jamais sur le cloud.</td>
+    </tr>
+    <tr>
+      <td>T2</td>
+      <td>Pierre publie un tournoi qui inclut à la fois Sophie et Marc.</td>
+      <td>Le <code>local_players</code> JSONB pushé contient les deux noms, mais seule Sophie a son <code>emailHash</code> renseigné. Marc apparait avec <code>emailHash: null</code>.</td>
+    </tr>
+    <tr>
+      <td>T3</td>
+      <td>Sophie va sur pokclock.com, entre son email, reçoit le lien magique, clique → compte créé.</td>
+      <td>Au <code>verifyMagicLink</code>, <code>autoLinkPlayerToClubs</code> scanne les deux sources en UNION (tournois publiés + roster club). Trouve Sophie dans <code>clubs.member_roster</code>. Crée une <code>player_club_memberships</code> en <strong>pending</strong>.</td>
+    </tr>
+    <tr>
+      <td>T4</td>
+      <td>Pierre voit la demande de Sophie dans WPF → MEMBRES JOUEURS, statut En attente. Clique <strong>Approuver</strong>.</td>
+      <td>Membership passe <code>active</code>. Sophie voit désormais le widget Poker Club Bordeaux dans son dashboard pokclock.com.</td>
+    </tr>
+    <tr>
+      <td>T5</td>
+      <td>Marc, lui, ne crée pas de compte cloud. Il vient juste au tournoi physique.</td>
+      <td>Aucune trace cloud, aucune adhésion auto. Si plus tard Marc voulait s'inscrire à un tournoi public, il pourrait le faire de manière anonyme via le formulaire web — mais aucune adhésion automatique avec le club ne sera créée.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>État DB après la saisie</h3>
+
+<table>
+  <thead><tr><th>Table</th><th>Row Sophie</th><th>Row Marc</th></tr></thead>
+  <tbody>
+    <tr><td>SQLite locale WPF <code>Players</code></td><td><code>MembershipType='Member'</code>, <code>Email='sophie.dubois@example.com'</code></td><td><code>MembershipType='Guest'</code>, <code>Email='marc.x@example.com'</code></td></tr>
+    <tr><td>Postgres cloud <code>clubs.member_roster</code> (JSONB)</td><td>présente, <code>emailHash</code> renseigné</td><td>absente</td></tr>
+    <tr><td>Postgres cloud <code>published_tournaments.local_players</code></td><td>présente, <code>emailHash</code> renseigné</td><td>présente, <code>emailHash: null</code></td></tr>
+    <tr><td>Postgres cloud <code>player_club_memberships</code> (après login)</td><td>créée auto en <code>pending</code> (T3)</td><td>jamais créée</td></tr>
+  </tbody>
+</table>
+
+<h3>Edge cases</h3>
+<ul>
+  <li><strong>Sync background échoue (réseau down)</strong> : le save côté WPF réussit quand même (DB locale OK), aucune dialog d'erreur. Pierre re-sauvera un joueur quelconque plus tard pour retrigger.</li>
+  <li><strong>Bascule rétroactive Guest → Member</strong> : Pierre se rend compte que Marc devrait en fait être Member. Il édite la fiche, change le type, sauvegarde. Le roster est re-pushé avec Marc cette fois. Mais les snapshots des tournois déjà publiés contiennent toujours <code>emailHash: null</code> pour Marc — pas de rétro-actif.</li>
+  <li><strong>Suppression d'un membre côté WPF</strong> : prochaine sync, le roster pushé n'inclut plus ce joueur. Côté cloud, son entrée disparait de <code>clubs.member_roster</code>. Mais une membership <code>active</code> existante n'est PAS révoquée automatiquement (Pierre doit cliquer <em>Exclure</em> dans WPF MEMBRES JOUEURS).</li>
+  <li><strong>Joueur sans email</strong> : Pierre saisit un membre sans renseigner d'email. Le roster contient son nom mais pas de hash. Aucune possibilité d'auto-link tant qu'il n'a pas d'email.</li>
+</ul>
+
+<h3>Touchpoints API</h3>
+<table>
+  <thead><tr><th>Acteur</th><th>Endpoint</th><th>Rôle</th></tr></thead>
+  <tbody>
+    <tr><td>WPF admin</td><td><code>PUT /api/club/roster</code></td><td>Push le roster complet à chaque save d'un Member</td></tr>
+    <tr><td>WPF admin</td><td><code>POST /api/club/tournaments</code></td><td>Le publish embarque toujours <code>local_players[].emailHash</code> filtré sur Members</td></tr>
+    <tr><td>Joueur</td><td><code>GET /api/players/auth/magic-link/verify</code></td><td>Hook <code>autoLinkPlayerToClubs</code> scanne UNION roster + local_players</td></tr>
+    <tr><td>Joueur</td><td><code>GET /api/players/me/dashboard</code></td><td>Retrigger l'auto-link au refresh (Phase 0.I)</td></tr>
+    <tr><td>Admin</td><td><code>POST /api/club/memberships/:id/approve</code></td><td>Validation de la pending membership créée automatiquement</td></tr>
+  </tbody>
+</table>
+
+<h3>Voir aussi</h3>
+<ul>
+  <li><a href="architecture.html#roster">Architecture § 15 — Roster club persistant + Member/Guest</a></li>
+  <li><a href="api-routes.html#club-admin">Référence API § /api/club/roster</a></li>
+  <li><a href="#scenario-autolink">Scénario auto-link Phase 0.H</a> pour le mécanisme de base</li>
 </ul>
 
 </section>
